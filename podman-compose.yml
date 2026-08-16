@@ -1,0 +1,86 @@
+version: "3.8"
+
+networks:
+  opennms-net:
+    driver: bridge
+
+volumes:
+  psql-data:
+  opennms-data:
+  opennms-etc:
+
+services:
+  database:
+    image: docker.io/library/postgres:14
+    # To use the optional customization Dockerfile instead of the official
+    # image directly, comment out `image:` above and uncomment:
+    # build: ./database
+    container_name: database
+    env_file:
+      - .postgres.env
+    volumes:
+      - psql-data:/var/lib/postgresql/data
+    networks:
+      - opennms-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+
+  opennms:
+    image: docker.io/opennms/horizon:latest
+    # To use the optional customization Dockerfile instead of the official
+    # image directly, comment out `image:` above and uncomment:
+    # build: ./opennms
+    container_name: opennms
+    init: true
+    env_file:
+      - .opennms.env
+      - .postgres.env
+    depends_on:
+      database:
+        condition: service_healthy
+    volumes:
+      - opennms-data:/opennms-data
+      - opennms-etc:/opt/opennms/etc
+      - ./etc-overlay:/opt/opennms-etc-overlay
+    command: ["-s"]
+    networks:
+      - opennms-net
+    ports:
+      - "8980:8980"     # web UI + REST
+      - "8101:8101"     # Karaf SSH shell
+      - "162:1162/udp"  # SNMP trap receiver -- host 162 (privileged) mapped to
+                        # an unprivileged in-container port so rootless Podman
+                        # doesn't need extra capabilities. Adjust Trapd's
+                        # listen port to match (1162), or run rootful if you'd
+                        # rather bind 162 directly inside the container.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-I", "http://localhost:8980/opennms/login.jsp"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+
+  py-events:
+    build: ./py-events
+    container_name: py-events
+    env_file:
+      - ./py-events/.env
+    depends_on:
+      opennms:
+        condition: service_healthy
+    networks:
+      - opennms-net
+
+# NOTE: some podman-compose versions ignore `depends_on: condition:` and only
+# wait for a container to *start*, not for its healthcheck to pass. Check
+# `podman-compose version`; if yours doesn't honor `condition:`, poll manually
+# between steps instead of trusting depends_on alone -- see the step-by-step
+# guide's Part 5 for the wait-loop snippet.
+
+# NOTE: the Raspberry Pi is intentionally NOT a service in this file -- it's
+# real hardware on your LAN, reached by its own IP address, not a compose
+# service name. See the step-by-step guide, Part 3, for setting it up.

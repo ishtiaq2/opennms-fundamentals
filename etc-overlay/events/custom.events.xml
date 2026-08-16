@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<events xmlns="http://xmlns.opennms.org/xsd/eventconf">
+  <event>
+    <uei>uei.opennms.org/custom/pythonHealthCheck/serviceDown</uei>
+    <event-label>Custom: Python health-check reports service down</event-label>
+    <descr>&lt;p&gt;The Python health-check script reported %parm[serviceName]% as DOWN on %nodelabel%.&lt;/p&gt;</descr>
+    <logmsg dest="logndisplay">Python health check: %parm[serviceName]% is DOWN on %nodelabel%</logmsg>
+    <severity>Major</severity>
+    <alarm-data reduction-key="%uei%:%nodeid%:%parm[serviceName]%" alarm-type="1" auto-clean="false"/>
+  </event>
+
+  <event>
+    <uei>uei.opennms.org/custom/pythonHealthCheck/serviceUp</uei>
+    <event-label>Custom: Python health-check reports service restored</event-label>
+    <descr>&lt;p&gt;The Python health-check script reported %parm[serviceName]% as UP again on %nodelabel%.&lt;/p&gt;</descr>
+    <logmsg dest="logndisplay">Python health check: %parm[serviceName]% is UP on %nodelabel%</logmsg>
+    <severity>Normal</severity>
+    <alarm-data reduction-key="%uei%:%nodeid%:%parm[serviceName]%"
+                alarm-type="2"
+                clear-key="uei.opennms.org/custom/pythonHealthCheck/serviceDown:%nodeid%:%parm[serviceName]%"
+                auto-clean="false"/>
+  </event>
+</events>
