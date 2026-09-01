@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  SNMP Trap Northbounder config for this lab.
+
+  Based on OpenNMS's own default etc/snmptrap-northbounder-configuration.xml
+  (pulled from the OpenNMS source tree) with <enabled> flipped to true and
+  a trap sink pointed at northbounder-lab's snmptrap-receiver, with a
+  mapping-group modeled on a real production example (michael-batz/
+  alarmRetarder) rather than invented from scratch.
+
+  Two things this depends on that live OUTSIDE this file:
+    1. etc/snmp-config.xml needs an entry (or the top-level default) for
+       REPLACE_HOST with version v2c - the northbounder looks up
+       community/security settings there, not here.
+    2. REPLACE_HOST: "snmptrap-receiver" if on the shared podman network,
+       or your real LAN IP otherwise (same rule as the syslog config).
+
+  The enterprise OID below (.1.3.6.1.4.1.99999...) is the same
+  "unassigned/example" arc used in most OpenNMS northbounder tutorials -
+  fine for this lab, but register (or borrow your org's) a real private
+  enterprise number before doing this for anything that matters.
+-->
+<snmptrap-northbounder-config>
+   <enabled>true</enabled>
+   <nagles-delay>1000</nagles-delay>
+   <batch-size>100</batch-size>
+   <queue-size>300000</queue-size>
+
+   <snmp-trap-sink>
+      <name>northbounder-lab</name>
+      <ip-address>REPLACE_HOST</ip-address>
+      <version>v2c</version>
+      <!-- Port defaults to 162 via snmp-config.xml; override here since
+           the lab receiver listens on 1162 (no root needed in-container) -->
+      <port>1162</port>
+
+      <mapping-group name="northbounder-lab-mappings">
+         <rule>uei matches '.*'</rule>
+
+         <mapping name="problem">
+            <rule>(alarmType == AlarmType.PROBLEM) || (alarmType == AlarmType.NOTIFICATION)</rule>
+            <enterprise-oid>.1.3.6.1.4.1.99999.3</enterprise-oid>
+            <specific>1</specific>
+            <varbind>
+               <oid>.1.3.6.1.4.1.99999.3.1</oid>
+               <type>OctetString</type>
+               <value>id</value>
+            </varbind>
+            <varbind>
+               <oid>.1.3.6.1.4.1.99999.3.2</oid>
+               <type>OctetString</type>
+               <value>nodeLabel</value>
+            </varbind>
+            <varbind>
+               <oid>.1.3.6.1.4.1.99999.3.3</oid>
+               <type>OctetString</type>
+               <value>severity</value>
+            </varbind>
+            <varbind>
+               <oid>.1.3.6.1.4.1.99999.3.4</oid>
+               <type>OctetString</type>
+               <value>logMsg</value>
+               <max>255</max>
+            </varbind>
+         </mapping>
+
+         <mapping name="resolution">
+            <rule>alarmType == AlarmType.RESOLUTION</rule>
+            <enterprise-oid>.1.3.6.1.4.1.99999.3</enterprise-oid>
+            <specific>2</specific>
+            <varbind>
+               <oid>.1.3.6.1.4.1.99999.3.1</oid>
+               <type>OctetString</type>
+               <value>id</value>
+            </varbind>
+            <varbind>
+               <oid>.1.3.6.1.4.1.99999.3.2</oid>
+               <type>OctetString</type>
+               <value>nodeLabel</value>
+            </varbind>
+         </mapping>
+      </mapping-group>
+   </snmp-trap-sink>
+</snmptrap-northbounder-config>

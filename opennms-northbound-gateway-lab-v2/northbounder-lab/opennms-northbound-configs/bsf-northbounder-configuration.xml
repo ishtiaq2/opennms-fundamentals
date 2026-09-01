@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  BSF Northbounder config for this lab - used as the "REST/webhook"
+  northbounder.
+
+  Why BSF and not a stock HTTP Northbounder config: OpenNMS's javadocs
+  confirm an HttpNorthbounder class exists, but unlike Syslog and SNMP
+  Trap, there's no shipped etc/*-northbounder-configuration.xml for it
+  in the current OpenNMS source tree - so rather than invent one, this
+  uses the BSF (scripting) Northbounder, which IS shipped and
+  documented, to call the webhook directly from a small BeanShell
+  script. See GUIDE.md Part 11 for the full story, including how to
+  check whether your specific OpenNMS version/edition has a proper
+  HTTP Northbounder available and swap this out for it if so.
+
+  REPLACE_HOST: "webhook-receiver" on the shared podman network, or
+  your real LAN IP otherwise.
+-->
+<bsf-northbounder-config>
+   <enabled>true</enabled>
+   <nagles-delay>1000</nagles-delay>
+   <batch-size>100</batch-size>
+   <queue-size>300000</queue-size>
+
+   <engine>
+      <name>WebhookForwarder</name>
+      <filter>true</filter>
+      <language>beanshell</language>
+      <className>bsh.util.BeanShellBSFEngine</className>
+      <extensions>bsh</extensions>
+
+      <onStart>
+         log = bsf.lookupBean("log");
+         log.info("northbounder-lab webhook forwarder starting");
+      </onStart>
+
+      <onStop>
+         log.info("northbounder-lab webhook forwarder stopping");
+      </onStop>
+
+      <onAlarm>
+         a = bsf.lookupBean("alarm");
+         try {
+            url = new java.net.URL("http://REPLACE_HOST:9000/opennms/alarm");
+            conn = url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json");
+            conn.setConnectTimeout(3000);
+            conn.setReadTimeout(3000);
+            conn.setDoOutput(true);
+
+            msg = a.getLogMsg();
+            if (msg == null) msg = "";
+            msg = msg.replace("\\", "\\\\").replace("\"", "'");
+
+            label = a.getNodeLabel();
+            if (label == null) label = "";
+
+            json = "{"
+               + "\"alarmId\":" + a.getId() + ","
+               + "\"uei\":\"" + a.getUei() + "\","
+               + "\"nodeLabel\":\"" + label + "\","
+               + "\"severity\":\"" + a.getSeverity() + "\","
+               + "\"logMsg\":\"" + msg + "\""
+               + "}";
+
+            os = conn.getOutputStream();
+            os.write(json.getBytes("UTF-8"));
+            os.flush();
+            os.close();
+
+            log.info("webhook forwarder: posted alarm " + a.getId() + " -> HTTP " + conn.getResponseCode());
+         } catch (Exception e) {
+            log.error("webhook forwarder: failed to post alarm " + a.getId() + ": " + e);
+         }
+      </onAlarm>
+   </engine>
+</bsf-northbounder-config>

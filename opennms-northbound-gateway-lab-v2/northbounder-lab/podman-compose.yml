@@ -1,0 +1,41 @@
+# Receivers that stand in for the external systems OpenNMS's native
+# Northbounders push alarms to. These don't run OpenNMS itself - point
+# your real instance (or your Learning Lab repo's containerized one)
+# at whichever of these you're practicing with, using the
+# opennms-northbound-configs/ files as your etc-overlay. See GUIDE.md
+# Part 10 onward.
+#
+#   podman network create northbound-lab   # if you haven't already
+#   podman-compose up --build
+
+networks:
+  northbound-lab:
+    external: true
+
+services:
+  webhook-receiver:
+    build: ./receivers/webhook-receiver
+    image: northbounder-lab-webhook-receiver:latest
+    ports:
+      - "9000:9000"
+    networks:
+      - northbound-lab
+    restart: unless-stopped
+
+  syslog-receiver:
+    build: ./receivers/syslog-receiver
+    image: northbounder-lab-syslog-receiver:latest
+    ports:
+      - "5140:5140/udp"
+    networks:
+      - northbound-lab
+    restart: unless-stopped
+
+  snmptrap-receiver:
+    build: ./receivers/snmptrap-receiver
+    image: northbounder-lab-snmptrap-receiver:latest
+    ports:
+      - "1162:1162/udp"
+    networks:
+      - northbound-lab
+    restart: unless-stopped

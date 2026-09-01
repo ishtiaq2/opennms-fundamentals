@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Syslog Northbounder config for this lab.
+
+  This is OpenNMS's own default etc/syslog-northbounder-configuration.xml
+  (pulled from the OpenNMS source tree, opennms-base-assembly/src/main/
+  filtered/etc/) with <enabled> flipped to true and <destination> pointed
+  at northbounder-lab's syslog-receiver instead of 127.0.0.1:514.
+  Drop this into your etc-overlay in place of the stock file.
+
+  REPLACE_HOST below:
+    - "syslog-receiver"     if OpenNMS is on the shared `northbound-lab`
+                            podman network (see GUIDE.md Part 10)
+    - your real LAN IP      if OpenNMS runs elsewhere and only the
+                            receiver's host port is reachable from it
+-->
+<syslog-northbounder-config>
+   <enabled>true</enabled>
+   <nagles-delay>1000</nagles-delay>
+   <batch-size>100</batch-size>
+   <queue-size>300000</queue-size>
+   <message-format>ALARM ID:${alarmId} NODE:${nodeLabel} SEV:${severity}; ${logMsg}</message-format>
+
+   <destination>
+      <destination-name>northbounder-lab</destination-name>
+      <host>REPLACE_HOST</host>
+      <port>5140</port>
+      <ip-protocol>UDP</ip-protocol>
+      <facility>LOCAL0</facility>
+      <max-message-length>1024</max-message-length>
+      <send-local-name>true</send-local-name>
+      <send-local-time>true</send-local-time>
+      <truncate-message>false</truncate-message>
+   </destination>
+
+   <!-- Start narrow while you're testing - forward everything once you've
+        confirmed the pipe works end to end.
+   <uei>uei.opennms.org/nodes/nodeDown</uei>
+   <uei>uei.opennms.org/nodes/nodeUp</uei>
+   -->
+</syslog-northbounder-config>
