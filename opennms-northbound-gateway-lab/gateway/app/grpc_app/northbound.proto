@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package northbound;
+
+// NorthboundGateway is the gRPC face of the API gateway. It mirrors the
+// REST API's core operations (see gateway/app/routes.py) so REST and gRPC
+// clients get the same validated, rate-limited access to OpenNMS.
+service NorthboundGateway {
+  rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse);
+  rpc GetNode (GetNodeRequest) returns (NodeResponse);
+  rpc ListNodes (ListNodesRequest) returns (ListNodesResponse);
+  rpc ListAlarms (ListAlarmsRequest) returns (ListAlarmsResponse);
+
+  // Server-streaming example: polls OpenNMS for events and streams new
+  // ones to the client. This is the kind of thing gRPC does that a plain
+  // REST endpoint can't do without polling or websockets.
+  rpc StreamEvents (StreamEventsRequest) returns (stream EventMessage);
+}
+
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  string status = 1;   // "ok" | "unreachable"
+  string backend = 2;  // upstream OpenNMS base URL
+}
+
+message GetNodeRequest {
+  int32 node_id = 1;
+}
+
+message NodeResponse {
+  int32 node_id = 1;
+  string label = 2;
+  string sys_object_id = 3;
+  bool provisioned = 4;
+}
+
+message ListNodesRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+message ListNodesResponse {
+  repeated NodeResponse nodes = 1;
+  int32 total = 2;
+}
+
+message ListAlarmsRequest {
+  string severity = 1; // optional filter: WARNING, MINOR, MAJOR, CRITICAL, ...
+  int32 limit = 2;
+}
+
+message Alarm {
+  int32 alarm_id = 1;
+  string uei = 2;
+  string severity = 3;
+  string log_msg = 4;
+  int32 node_id = 5;
+}
+
+message ListAlarmsResponse {
+  repeated Alarm alarms = 1;
+}
+
+message StreamEventsRequest {
+  int32 poll_interval_seconds = 1;
+}
+
+message EventMessage {
+  int32 event_id = 1;
+  string uei = 2;
+  string description = 3;
+  string timestamp = 4;
+}

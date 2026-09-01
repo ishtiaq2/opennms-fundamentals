@@ -1,0 +1,41 @@
+# Core stack for the Northbound Gateway practice lab.
+#
+#   podman-compose up --build                    -> gateway only,
+#       proxying to whatever OPENNMS_BASE_URL in .env points at
+#       (your real instance by default - see .env.example)
+#
+#   podman-compose --profile mock up --build      -> gateway + a fake
+#       OpenNMS backend, for offline practice with no real instance
+#       reachable (see mock-backend/, GUIDE.md Part 4b)
+#
+# If your podman-compose version doesn't support `profiles` (older
+# releases don't), just run the mock backend directly instead:
+#   podman build -t northbound-mock-backend ./mock-backend
+#   podman run --rm -p 8980:8980 --network northbound-lab northbound-mock-backend
+
+networks:
+  northbound-lab:
+    external: true
+
+services:
+  gateway:
+    build: ./gateway
+    image: northbound-gateway:latest
+    env_file: .env
+    ports:
+      - "${REST_PORT:-8000}:8000"
+      - "${GRPC_PORT:-50051}:50051"
+    networks:
+      - northbound-lab
+    restart: unless-stopped
+
+  mock-backend:
+    build: ./mock-backend
+    image: northbound-mock-backend:latest
+    ports:
+      - "8980:8980"
+    networks:
+      - northbound-lab
+    restart: unless-stopped
+    profiles:
+      - mock
