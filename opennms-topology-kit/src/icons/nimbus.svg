@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sample icon (low-power remote unit). Replace with your own SVG. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="a" cx="0.5" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d3e2f1"/>
+    </radialGradient>
+  </defs>
+  <path d="M21 25a15 15 0 0 1 22 0M15 18a24 24 0 0 1 34 0" fill="none" stroke="#0b84c6" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M13 48a19 19 0 0 1 38 0z" fill="url(#a)" stroke="#1f3a5f" stroke-width="3"/>
+  <rect x="9" y="47" width="46" height="8" rx="3" fill="#1f3a5f"/>
+</svg>

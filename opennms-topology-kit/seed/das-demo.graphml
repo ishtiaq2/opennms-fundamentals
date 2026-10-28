@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Development demo: the DAS as a GraphML view. Vertices point to the DAS-Demo nodes, so they
+     show their alarms; iconKey picks the icon directly. -->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
+  <key id="label" for="graphml" attr.name="label" attr.type="string"/>
+  <key id="label" for="graph" attr.name="label" attr.type="string"/>
+  <key id="namespace" for="graph" attr.name="namespace" attr.type="string"/>
+  <key id="focus-strategy" for="graph" attr.name="focus-strategy" attr.type="string"/>
+  <key id="preferred-layout" for="graph" attr.name="preferred-layout" attr.type="string"/>
+  <key id="vertex-status-provider" for="graph" attr.name="vertex-status-provider" attr.type="string"/>
+  <key id="label" for="node" attr.name="label" attr.type="string"/>
+  <key id="iconKey" for="node" attr.name="iconKey" attr.type="string"/>
+  <key id="foreignSource" for="node" attr.name="foreignSource" attr.type="string"/>
+  <key id="foreignID" for="node" attr.name="foreignID" attr.type="string"/>
+  <key id="level" for="node" attr.name="level" attr.type="int"/>
+  <key id="tooltipText" for="edge" attr.name="tooltipText" attr.type="string"/>
+  <data key="label">DAS demo (GraphML)</data>
+  <graph id="das-demo" edgedefault="undirected">
+    <data key="namespace">das-demo</data>
+    <data key="label">DAS demo</data>
+    <data key="focus-strategy">ALL</data>
+    <data key="preferred-layout">Hierarchy Layout</data>
+    <data key="vertex-status-provider">default</data>
+    <node id="orion-1"><data key="label">orion-1</data><data key="iconKey">das_orion</data><data key="foreignSource">DAS-Demo</data><data key="foreignID">orion-1</data><data key="level">0</data></node>
+    <node id="helix-1"><data key="label">helix-1</data><data key="iconKey">das_helix</data><data key="foreignSource">DAS-Demo</data><data key="foreignID">helix-1</data><data key="level">1</data></node>
+    <node id="stratus-1"><data key="label">stratus-1</data><data key="iconKey">das_stratus</data><data key="foreignSource">DAS-Demo</data><data key="foreignID">stratus-1</data><data key="level">1</data></node>
+    <node id="stratus-2"><data key="label">stratus-2</data><data key="iconKey">das_stratus</data><data key="foreignSource">DAS-Demo</data><data key="foreignID">stratus-2</data><data key="level">1</data></node>
+    <node id="nimbus-1"><data key="label">nimbus-1</data><data key="iconKey">das_nimbus</data><data key="foreignSource">DAS-Demo</data><data key="foreignID">nimbus-1</data><data key="level">2</data></node>
+    <node id="nimbus-2"><data key="label">nimbus-2</data><data key="iconKey">das_nimbus</data><data key="foreignSource">DAS-Demo</data><data key="foreignID">nimbus-2</data><data key="level">2</data></node>
+    <edge id="orion-1.Q1" source="orion-1" target="stratus-1"><data key="tooltipText">Q1 - QSFP28 100G</data></edge>
+    <edge id="orion-1.Q2" source="orion-1" target="helix-1"><data key="tooltipText">Q2 - QSFP+ 40G</data></edge>
+    <edge id="orion-1.Q3" source="orion-1" target="stratus-2"><data key="tooltipText">Q3 - SFP28 25G in QSA</data></edge>
+    <edge id="helix-1.S1" source="helix-1" target="nimbus-1"><data key="tooltipText">S1 - SFP28 25G</data></edge>
+    <edge id="helix-1.S2" source="helix-1" target="nimbus-2"><data key="tooltipText">S2 - SFP28 25G</data></edge>
+  </graph>
+</graphml>

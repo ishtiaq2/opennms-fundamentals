@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sample icon (hub). Replace with your own SVG. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs><style>.cls-1{fill:none;stroke:#0b84c6;stroke-width:4;stroke-linecap:round}.cls-2{fill:#0b84c6}.cls-3{fill:#1f3a5f}</style></defs>
+  <path class="cls-1" d="M32 32 10 12M32 32 54 12M32 32 10 52M32 32 54 52"/>
+  <circle class="cls-2" cx="10" cy="12" r="5"/>
+  <circle class="cls-2" cx="54" cy="12" r="5"/>
+  <circle class="cls-2" cx="10" cy="52" r="5"/>
+  <circle class="cls-2" cx="54" cy="52" r="5"/>
+  <circle class="cls-3" cx="32" cy="32" r="12"/>
+  <circle cx="32" cy="32" r="4.5" fill="#ffffff"/>
+</svg>

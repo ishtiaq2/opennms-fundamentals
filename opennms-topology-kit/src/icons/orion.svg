@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sample icon (master unit). Replace with your own SVG. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs><style>.cls-1{fill:#1f3a5f}.cls-2{fill:#ffffff}.cls-3{fill:#3ccf73}</style></defs>
+  <rect class="cls-1" x="6" y="8" width="52" height="48" rx="5"/>
+  <rect class="cls-2" x="12" y="15" width="30" height="6" rx="1.5"/>
+  <rect class="cls-2" x="12" y="25" width="30" height="6" rx="1.5"/>
+  <rect class="cls-2" x="12" y="35" width="30" height="6" rx="1.5"/>
+  <rect class="cls-2" x="12" y="45" width="30" height="5" rx="1.5"/>
+  <circle class="cls-3" cx="49" cy="18" r="3"/>
+  <circle class="cls-3" cx="49" cy="28" r="3"/>
+  <circle class="cls-3" cx="49" cy="38" r="3"/>
+</svg>
