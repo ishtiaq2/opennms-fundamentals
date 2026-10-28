@@ -47,10 +47,13 @@ up() {
   p start "$DEV_CONTAINER" >/dev/null
   wait_for OpenNMS opennms_ready
   if [ ! -f .dev/seeded ]; then
-    node tools/onms.mjs seed --url "$URL" --user "$DEV_USER" --password "$DEV_PASSWORD"
-    mkdir -p .dev && touch .dev/seeded
+    if node tools/onms.mjs seed --url "$URL" --user "$DEV_USER" --password "$DEV_PASSWORD"; then
+      mkdir -p .dev && touch .dev/seeded
+    else
+      echo "The demo seed did not complete (see above); ./dev.sh up tries it again." >&2
+    fi
   fi
-  ./deploy.sh dev
+  bash ./deploy.sh dev
   echo
   echo "OpenNMS:  $URL/topology  ($DEV_USER / $DEV_PASSWORD), View > \"DAS demo (GraphML)\" or \"UserDefined\""
   echo "Live:     npm run dev    (preview on http://localhost:8099, every save is deployed here)"

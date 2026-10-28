@@ -28,6 +28,9 @@ npm ci
 npm run dev      # live preview on http://localhost:8099 and a deploy into the dev OpenNMS on every save
 ```
 
+"Permission denied" on `./dev.sh`: the unpacking tool dropped the executable bit; run
+`chmod +x dev.sh deploy.sh` once (or call them as `bash dev.sh up`).
+
 Open http://localhost:8980/opennms/topology (admin / admin) and pick **View > DAS demo (GraphML)** or
 **View > UserDefined** (its links can take a minute to appear after the first start). Save a file, wait a
 second, reload the topology page. The preview reloads by itself.

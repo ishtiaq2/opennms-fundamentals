@@ -113,28 +113,44 @@ async function seed() {
   if (list.length < 6) throw new Error(`only ${list.length} of 6 demo nodes were provisioned`);
   const id = Object.fromEntries(list.map((n) => [n.foreignId, n.id]));
 
-  console.log('seed: user-defined links (Enhanced Linkd views "All" and "UserDefined")');
-  const existing = await rest('GET', '/api/v2/userdefinedlinks?limit=0', undefined, 'application/xml');
-  for (const [a, portA, z, portZ, label] of DEMO_LINKS) {
-    if (existing.includes(`<link-id>${a}:${portA}-${z}:${portZ}</link-id>`)) continue;
-    await rest('POST', '/api/v2/userdefinedlinks',
-      `<user-defined-link><node-id-a>${id[a]}</node-id-a><component-label-a>${portA}</component-label-a>` +
-      `<node-id-z>${id[z]}</node-id-z><component-label-z>${portZ}</component-label-z>` +
-      `<link-id>${a}:${portA}-${z}:${portZ}</link-id><link-label>${label}</link-label><owner>das-demo</owner></user-defined-link>`);
-  }
+  // The remaining steps are independent: one failing does not stop the others.
+  const failed = [];
+  const step = async (title, work) => {
+    console.log(`seed: ${title}`);
+    try {
+      await work();
+    } catch (e) {
+      console.error(`  failed: ${e.message}`);
+      failed.push(title);
+    }
+  };
 
-  console.log('seed: GraphML view "DAS demo (GraphML)"');
-  await rest('DELETE', '/rest/graphml/das-demo').catch(() => {});
-  await rest('POST', '/rest/graphml/das-demo', await readFile(path.join(ROOT, 'seed', 'das-demo.graphml'), 'utf8'));
+  await step('user-defined links (Enhanced Linkd views "All" and "UserDefined")', async () => {
+    const existing = await rest('GET', '/api/v2/userdefinedlinks?limit=0', undefined, 'application/xml');
+    for (const [a, portA, z, portZ, label] of DEMO_LINKS) {
+      if (existing.includes(`<link-id>${a}:${portA}-${z}:${portZ}</link-id>`)) continue;
+      await rest('POST', '/api/v2/userdefinedlinks',
+        `<user-defined-link><node-id-a>${id[a]}</node-id-a><component-label-a>${portA}</component-label-a>` +
+        `<node-id-z>${id[z]}</node-id-z><component-label-z>${portZ}</component-label-z>` +
+        `<link-id>${a}:${portA}-${z}:${portZ}</link-id><link-label>${label}</link-label><owner>das-demo</owner></user-defined-link>`);
+    }
+  });
 
-  console.log('seed: a nodeDown alarm on nimbus-2');
-  await rest('POST', '/rest/events',
-    `<event xmlns="http://xmlns.opennms.org/xsd/event"><uei>uei.opennms.org/nodes/nodeDown</uei>` +
-    `<source>das-topology-kit</source><nodeid>${id['nimbus-2']}</nodeid></event>`);
+  await step('GraphML view "DAS demo (GraphML)"', async () => {
+    await rest('DELETE', '/rest/graphml/das-demo').catch(() => {});
+    await rest('POST', '/rest/graphml/das-demo', await readFile(path.join(ROOT, 'seed', 'das-demo.graphml'), 'utf8'));
+  });
 
-  const { text } = mapping(list, await iconNames(), ['nodes', 'nodes:UserDefined'], `${base} (${fs})`);
-  await writeFile(path.join(ROOT, 'src', 'icon-mapping.dev.cfg'), text);
-  console.log('seed: wrote src/icon-mapping.dev.cfg');
+  await step('a nodeDown alarm on nimbus-2', () =>
+    rest('POST', '/rest/events',
+      `<event xmlns="http://xmlns.opennms.org/xsd/event"><uei>uei.opennms.org/nodes/nodeDown</uei>` +
+      `<source>das-topology-kit</source><nodeid>${id['nimbus-2']}</nodeid></event>`));
+
+  await step('icon mappings for the demo nodes in src/icon-mapping.dev.cfg', async () => {
+    const { text } = mapping(list, await iconNames(), ['nodes', 'nodes:UserDefined'], `${base} (${fs})`);
+    await writeFile(path.join(ROOT, 'src', 'icon-mapping.dev.cfg'), text);
+  });
+  if (failed.length) throw new Error(`these steps failed: ${failed.join('; ')}`);
 }
 
 const commands = { map, seed };

@@ -156,9 +156,9 @@ if (!args.includes('--watch')) {
   const log = (msg) => console.log(`${new Date().toLocaleTimeString()} ${msg}`);
   const deploy = () =>
     new Promise((done) =>
-      spawn(path.join(ROOT, 'deploy.sh'), ['dev', '--no-build', '--if-running'], { cwd: ROOT, stdio: 'inherit' })
+      spawn('bash', [path.join(ROOT, 'deploy.sh'), 'dev', '--no-build', '--if-running'], { cwd: ROOT, stdio: 'inherit' })
         .on('exit', done)
-        .on('error', done),
+        .on('error', (e) => done(log(`deploy failed: ${e.message}`))),
     );
   let busy = false;
   let again = false;
