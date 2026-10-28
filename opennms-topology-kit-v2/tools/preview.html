@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Topology preview</title>
+<!-- Draws nodes and links with the same SVG elements and classes as the OpenNMS 33.1.8 topology
+     page (GWTVertex/GWTEdge) and loads the built file the same way, so CSS and icons behave alike. -->
+<style>
+  body { margin: 0; font-family: "Open Sans", Arial, Helvetica, sans-serif; color: #1f2933; background: #f4f6f8; }
+  header { padding: 12px 20px; display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  header span { font-size: 13px; color: #5b6878; }
+  #error { color: #b42318; font-weight: 600; }
+  main { margin: 0 20px 20px; background: #fff; border: 1px solid #ddd; overflow: auto; }
+  svg text.legend { font-size: 12px; fill: #5b6878; }
+  svg text.heading { font-size: 13px; font-weight: 600; fill: #1f2933; }
+</style>
+<!-- Excerpt of OpenNMS 33.1.8 topo_default/styles.css: the rules for links and nodes. -->
+<style>
+  .edge { stroke: #ccc; }
+  .edge.selected,
+  .edge .status.indeterminate { stroke: #999000; }
+  .edge.up, .edge.normal { stroke: #336600; }
+  .edge.warning { stroke: #FFCC00; }
+  .edge.minor { stroke: #FF9900; }
+  .edge.major { stroke: #FF3300; }
+  .edge.down, .edge.critical { stroke: #CC0000; }
+  .vertex .icon-container { pointer-events: none; }
+  .vertex-label { alignment-base: text-before-edge; text-anchor: middle; font-size: 9px; }
+  .vertex .status.selected, .vertex .status.cleared, .vertex .status.normal, .vertex .status.indeterminate,
+  .vertex .status.warning, .vertex .status.minor, .vertex .status.major, .vertex .status.critical { opacity: 1; }
+  .vertex .status.cleared { stroke: #999; fill: #999; }
+  .vertex .status.normal { stroke: #336600; fill: #336600; }
+  .vertex .status.indeterminate { stroke: #999000; fill: #999000; }
+  .vertex .status.warning { stroke: #FFCC00; fill: #FFCC00; }
+  .vertex .status.minor { stroke: #FF9900; fill: #FF9900; }
+  .vertex .status.major { stroke: #FF3300; fill: #FF3300; }
+  .vertex .status.critical { stroke: #CC0000; fill: #CC0000; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Topology preview</h1>
+  <span id="info">loading…</span>
+  <span>Edit src/ and this page reloads. Point at or click nodes and links.</span>
+  <span id="error"></span>
+</header>
+<main>
+  <svg id="map" width="980" height="520" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <defs></defs>
+    <g id="hiddenIconContainer" transform="translate(-1000, -1000)"></g>
+    <g id="edges"></g>
+    <g id="vertices"></g>
+    <g id="legend"></g>
+  </svg>
+</main>
+<script type="module">
+const NS = 'http://www.w3.org/2000/svg';
+const XLINK = 'http://www.w3.org/1999/xlink';
+const $ = (sel) => document.querySelector(sel);
+function el(parent, name, attrs = {}, text) {
+  const e = document.createElementNS(NS, name);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'href') e.setAttributeNS(XLINK, 'xlink:href', v);
+    else e.setAttribute(k, v);
+  }
+  if (text !== undefined) e.textContent = text;
+  parent.appendChild(e);
+  return e;
+}
+
+// Same as OpenNMS D3.injectSVGDef: fetch the file, import its root <svg> into the page's <defs>.
+async function inject(url) {
+  const doc = new DOMParser().parseFromString(await (await fetch(url)).text(), 'image/svg+xml');
+  if (doc.querySelector('parsererror')) throw new Error(`${url} is not well-formed XML`);
+  $('defs').appendChild(document.importNode(doc.documentElement, true));
+}
+
+// Same as GWTVertex.normalizeSVGIcon: scale the longest side of the icon to 48 px.
+function iconSize(id) {
+  const use = el($('#hiddenIconContainer'), 'use', { href: `#${id}` });
+  const { width, height } = use.getBBox();
+  use.remove();
+  const s = 48 / Math.max(width, height, 0.001);
+  return { s, w: width * s, h: height * s };
+}
+
+// Same elements and classes as GWTVertex.create()/draw().
+function vertex({ x, y, icon, label, status = '', state = '' }) {
+  const { s, w, h } = iconSize(icon);
+  const v = el($('#vertices'), 'g', { class: 'vertex' + (state === 'selected' ? ' selected' : ''), transform: `translate(${x},${y})` });
+  el(v, 'rect', { class: `status ${status}`.trim(), fill: 'none', 'stroke-width': 5, opacity: 0,
+    width: `${w}px`, height: `${h}px`, x: `${-w / 2}px`, y: `${-h / 2}px` });
+  const c = el(v, 'g', { class: 'icon-container', transform: `translate(-${w / 2} , -${h / 2}) scale(${s})` });
+  el(c, 'use', { href: `#${icon}`, class: 'upIcon' });
+  const over = el(c, 'use', { href: `#${icon}_rollover`, class: 'overIcon', opacity: state === 'hover' ? 1 : 0 });
+  const active = el(c, 'use', { href: `#${icon}_active`, class: 'activeIcon', opacity: state === 'selected' ? 1 : 0 });
+  el(v, 'text', { class: 'vertex-label', x: '0px', y: `${h / 2 + 11}px`, 'text-anchor': 'middle', 'alignment-baseline': 'text-before-edge' }, label);
+  const hit = el(v, 'rect', { class: 'svgIconOverlay', width: w, height: h, x: -w / 2, y: -h / 2, opacity: 0 });
+  hit.style.cursor = 'pointer';
+  hit.addEventListener('mouseover', () => over.setAttribute('opacity', 1));
+  hit.addEventListener('mouseout', () => over.setAttribute('opacity', state === 'hover' ? 1 : 0));
+  hit.addEventListener('click', () => {
+    const on = v.classList.toggle('selected');
+    active.setAttribute('opacity', on ? 1 : 0);
+  });
+  return { x, y };
+}
+
+// Same as GWTEdge.create()/draw(); linkd links also get an inline 3px width (additionalStyling).
+function edge(a, b, classes, inlineWidth = true) {
+  const p = el($('#edges'), 'path', { class: `edge ${classes}`.trim(), d: `M${a.x} ${a.y} Q ${(a.x + b.x) / 2} ${(a.y + b.y) / 2} ${b.x} ${b.y}` });
+  p.style.fill = 'none';
+  p.style.cursor = 'pointer';
+  if (inlineWidth) p.style.strokeWidth = '3px';
+  p.addEventListener('click', () => p.classList.toggle('selected'));
+}
+
+try {
+  const manifest = await (await fetch('/dist/manifest.json', { cache: 'no-store' })).json();
+  await inject(`/dist/svg/${manifest.svg}`);
+  $('#info').textContent = `${manifest.svg} · ${manifest.ids.join(', ')}`;
+  const pick = (name, i) => manifest.ids.find((id) => id.endsWith(`_${name}`)) ?? manifest.ids[i % manifest.ids.length];
+  const [orion, helix, stratus, nimbus] = ['orion', 'helix', 'stratus', 'nimbus'].map(pick);
+
+  const L = $('#legend');
+  el(L, 'text', { class: 'heading', x: 20, y: 28 }, 'DAS (Enhanced Linkd style links)');
+  const o = vertex({ x: 300, y: 70, icon: orion, label: 'orion-1', status: 'normal' });
+  const hx = vertex({ x: 150, y: 200, icon: helix, label: 'helix-1 (minor)', status: 'minor', state: 'hover' });
+  const s1 = vertex({ x: 300, y: 200, icon: stratus, label: 'stratus-1 (selected)', status: 'normal', state: 'selected' });
+  const s2 = vertex({ x: 450, y: 200, icon: stratus, label: 'stratus-2 (critical)', status: 'critical' });
+  const n1 = vertex({ x: 80, y: 330, icon: nimbus, label: 'nimbus-1 (warning)', status: 'warning' });
+  const n2 = vertex({ x: 220, y: 330, icon: nimbus, label: 'nimbus-2 (major)', status: 'major' });
+  edge(o, hx, 'up');
+  edge(o, s1, 'up selected');
+  edge(o, s2, 'down');
+  edge(hx, n1, 'up');
+  edge(hx, n2, 'up');
+
+  el(L, 'text', { class: 'heading', x: 600, y: 28 }, 'Link classes');
+  [['', 'no status (GraphML)', false], ['up', 'up / normal', true], ['minor', 'warning / minor (GraphML)', false],
+   ['down', 'down / major / critical', true], ['selected', 'selected', true]].forEach(([cls, text, linkd], i) => {
+    const y = 60 + i * 34;
+    edge({ x: 600, y }, { x: 700, y }, cls, linkd);
+    el(L, 'text', { class: 'legend', x: 715, y: y + 4 }, `edge ${cls}`.trim() + ` – ${text}`);
+  });
+
+  el(L, 'text', { class: 'heading', x: 600, y: 270 }, 'Icon states');
+  manifest.ids.forEach((id, i) => {
+    ['', 'hover', 'selected'].forEach((state, j) =>
+      vertex({ x: 630 + j * 100, y: 320 + i * 95, icon: id, label: `${id.replace(/^das_/, '')} ${state || 'normal'}`, state }));
+  });
+  $('#map').setAttribute('height', Math.max(520, 360 + manifest.ids.length * 95));
+} catch (e) {
+  $('#error').textContent = `Preview failed: ${e.message}`;
+}
+new EventSource('/events').onmessage = () => location.reload();
+</script>
+</body>
+</html>

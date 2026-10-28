@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Development demo: six DAS nodes without IP interfaces, so nothing is polled. -->
+<model-import xmlns="http://xmlns.opennms.org/xsd/config/model-import" foreign-source="DAS-Demo">
+  <node foreign-id="orion-1" node-label="orion-1"><category name="Orion"/></node>
+  <node foreign-id="helix-1" node-label="helix-1"><category name="Helix"/></node>
+  <node foreign-id="stratus-1" node-label="stratus-1"><category name="Stratus"/></node>
+  <node foreign-id="stratus-2" node-label="stratus-2"><category name="Stratus"/></node>
+  <node foreign-id="nimbus-1" node-label="nimbus-1"><category name="Nimbus"/></node>
+  <node foreign-id="nimbus-2" node-label="nimbus-2"><category name="Nimbus"/></node>
+</model-import>
