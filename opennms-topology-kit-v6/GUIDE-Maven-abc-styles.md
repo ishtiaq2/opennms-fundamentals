@@ -234,9 +234,10 @@ After each deploy, `./topo.sh` tells you which one applies: "New there: ..." or 
 ./topo.sh css prod       # the same for production
 ```
 ```bash
-Run ./topo.sh css,
-then ./topo.sh css das_nimbus to get the CSS for each part of that icon.
-Then try ./topo.sh example 12.
+./topo.sh css,
+./topo.sh css das_nimbus to get the CSS for each part of that icon.
+./topo.sh example 12.
+ ./topo.sh revert opennms/jetty-webapps/opennms/svg/nimbus.svg
 ```
 In the browser, http://192.168.0.47:8980/opennms/svg/zz-topology-styles.svg is an empty page whose source (Ctrl+U)
 shows your rules. On the topology page: F12 > Elements, Ctrl+F `zz-topology-styles`. The file sits in the `<defs>` of
