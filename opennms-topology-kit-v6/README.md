@@ -29,6 +29,7 @@ The addresses, names and images are in `kit.env`.
 
    ```bash
    tar xzf opennms-topology-kit.tar.gz && cd opennms-topology-kit
+   chmod +x dev.sh topo.sh examples/*.sh
    chmod +x dev.sh topo.sh   # only if "Permission denied": some unpackers drop the executable bit
    ./dev.sh up       # the development OpenNMS
    ./topo.sh pull    # the topology files of production: into opennms/, and onto dev
