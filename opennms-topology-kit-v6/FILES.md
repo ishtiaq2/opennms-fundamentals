@@ -227,8 +227,16 @@ beat the stock rules: `svg path.edge.up` beats `.edge.up`. A selector also needs
   only for what a page asks for while it loads. Reload with DevTools (F12) open and Network > Disable cache ticked.
 
 `./topo.sh deploy` says after each deploy which of the two applies, and `./topo.sh css [dev|prod]` whether that
-OpenNMS has your current `styles/topology.css`. Dev always gets the file; production gets it with your first rules,
-and keeps it from then on, so that open tabs keep it in their list.
+OpenNMS has your current `styles/topology.css`, what its web server answers for the file (status, type, size, cache
+header, same text or not), which svg files there differ from `opennms/`, and which rules of the svg files style the page
+itself. Dev always gets the file; production gets it with your first rules, and keeps it from then on, so that open tabs
+keep it in their list.
+
+Development and production are two OpenNMS, each with its own tabs, sessions and browser cache: what shows on dev can
+be missing on production because the production tab is older than the file, or the browser has an old copy of it. A
+private window has neither problem. A line with only the comment `/* mark */` in `styles/topology.css` makes the page show
+a yellow label, `topology.css` and 6 characters of the md5 of your file (printed by `./topo.sh css`): no label means the
+page does not have the file, other characters an old copy (guide, steps 6.2 and 6.4).
 
 **One icon.** Each svg file sits whole in the `<defs>` of the page; a node shows copies of one of its drawings
 (`<use href="#X">`). A rule whose selector holds the drawing's id styles a part of it in every copy, and wins over the

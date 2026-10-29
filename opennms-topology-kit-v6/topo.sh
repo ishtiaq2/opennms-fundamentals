@@ -11,7 +11,7 @@
 #   ./topo.sh diff                  your changes since the last pull or production deploy
 #   ./topo.sh revert [file]         drop those changes (all, or one file), and deploy to dev
 #   ./topo.sh icons [dev|prod]      the icons in the svg files, and the icon each node gets
-#   ./topo.sh css [dev|prod]        the svg files, style rules that clash, and whether styles/topology.css is there
+#   ./topo.sh css [dev|prod]        the svg files, style rules that clash, and whether styles/topology.css is there and served
 #   ./topo.sh css <file.svg | icon id>  CSS for the parts of one icon, to copy into styles/topology.css
 #   ./topo.sh view [list [dev|prod]]          the GraphML views there: entries of the View menu
 #   ./topo.sh view show <name> [dev|prod]     a view's nodes: id, label, icon key, the icon drawn
@@ -74,10 +74,21 @@ there() { awk -v f="$1" '$1 != "-" && $2 == f { found = 1 } END { exit !found }'
 
 # The CSS file inside an SVG: OpenNMS puts every svg of the folder into the topology page.
 css_body() { python3 -c 'import re, sys; sys.stdout.write(re.sub(r"\A\s*/\*.*?\*/[ \t]*\n?", "", open(sys.argv[1]).read(), flags=re.S))' "$1"; }
-has_rules() { [ -f "$STYLE_CSS" ] && python3 -c 'import re, sys; sys.exit(0 if re.sub(r"/\*.*?\*/", "", open(sys.argv[1]).read(), flags=re.S).strip() else 1)' "$STYLE_CSS"; }
+# A line with only the comment "mark" in styles/topology.css makes the page show a label with the version of the file.
+mark_on() { [ -f "$STYLE_CSS" ] && grep -Eq '^[[:space:]]*/\*[[:space:]]*mark[[:space:]]*\*/[[:space:]]*$' "$STYLE_CSS"; }
+mark_id() { md5sum <"$STYLE_CSS" | cut -c1-6; } # what the label says: topology.css <these 6 characters>
+has_rules() {
+  [ -f "$STYLE_CSS" ] || return 1
+  mark_on && return 0
+  python3 -c 'import re, sys; sys.exit(0 if re.sub(r"/\*.*?\*/", "", open(sys.argv[1]).read(), flags=re.S).strip() else 1)' "$STYLE_CSS"
+}
 style_svg() {
   printf '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"><!-- Made by topo.sh from %s. -->\n<style><![CDATA[\n' "$STYLE_CSS"
   sed 's/]]>/]]]]><![CDATA[>/g' "$STYLE_CSS"
+  if mark_on; then
+    printf '\n/* The label at the bottom left of the page: this CSS reached it. It shows the version of %s (6 characters of its md5). */\n' "$STYLE_CSS"
+    printf 'body::after { content: "topology.css %s"; position: fixed; left: 8px; bottom: 8px; z-index: 99999; padding: 2px 8px; border-radius: 3px; background: #ffe066; color: #000; font: 12px/1.4 monospace; pointer-events: none; }\n' "$(mark_id)"
+  fi
   printf ']]></style></svg>\n'
 }
 
@@ -327,8 +338,9 @@ deploy() {
   printf '%s deployed to %s: %s\n' "$(date +%T)" "$(name_of "$to")" "${changed[*]}${stale[*]:+ (removed ${stale[*]})}"
   [ ${#reload[@]} -eq 0 ] || say "  GraphML views loaded anew: ${reload[*]}"
   if [ ${#svg_new[@]} -gt 0 ]; then
-    say "  New there: ${svg_new[*]}. Open the topology page in a new browser tab: a tab reads the list of svg files"
-    say "  when it opens the page and keeps it on reload, so an open tab never loads a new svg file (FILES.md, section 6)."
+    say "  New there: ${svg_new[*]}. Open the topology page in a new browser tab (Ctrl+T; a private window does too): a"
+    say "  tab reads the list of svg files when it opens the page and keeps it on reload, so an open tab never loads a new"
+    say "  svg file (FILES.md, section 6)."
   fi
   if [ ${#svg_old[@]} -gt 0 ] && [ "$quiet" = 1 ]; then
     say "  (reload with the browser cache off: F12 > Network > Disable cache; svg files stay cached for an hour)"
@@ -559,12 +571,14 @@ view() {
 
 # ./topo.sh css [dev|prod]: the svg files and their style rules, and whether that OpenNMS has styles/topology.css.
 css_status() {
-  local to=$1 c home url n there_now mine sum old
+  local to=$1 c home url n there_now mine sum old mark
   [ -d "$WS" ] || die "./topo.sh pull first."
   python3 tools/svgcss.py overview "$WS/$SVG_DIR"
   n=$(python3 tools/svgcss.py count "$STYLE_CSS")
   say ""
-  say "$STYLE_CSS has $n rule(s). The topology page gets them from $STYLE_SVG:"
+  mark=''
+  ! mark_on || mark=' and the label of /* mark */'
+  say "$STYLE_CSS has $n rule(s)$mark. The topology page gets them from $STYLE_SVG:"
   if [ "$to" = prod ]; then url=$PROD_URL; else url="http://$(host_address):$DEV_PORT/opennms"; fi
   if [ "$to" = dev ] && ! running "$DEV_CONTAINER"; then
     say "  the development OpenNMS is not running (./dev.sh up)."
@@ -582,10 +596,98 @@ css_status() {
   else say "  $(name_of "$to") has an older version: ./topo.sh deploy $to"; fi
   old=$(grep -v -x -e "$STYLE_SVG" -e '' <<<"$(awk 'NF == 1' <<<"$there_now")" | sed 's|.*/||' | tr '\n' ' ' || true)
   [ -z "$old" ] || say "  It also has $old(the hashed names of kit 3.6 and older): the next ./topo.sh deploy $to removes them."
-  say "To see it: a browser tab keeps the list of svg files it got when it opened the topology page, so after the first"
-  say "deploy of ${STYLE_SVG##*/} open the page in a new tab once. The browser keeps svg files for an hour (OpenNMS"
-  say "sends Cache-Control: max-age=3600) and Ctrl+Shift+R is not enough: reload with DevTools (F12) open and Network >"
-  say "Disable cache ticked. FILES.md, section 6, and step 6 of GUIDE-Maven-abc-styles.md say more."
+  [ -z "$sum" ] || css_served "$to" "$url" "$c" "$mine"
+  css_files "$to" "$c" "$home"
+  say ""
+  say "If the topology page does not show it:"
+  say "  1. A tab keeps the list of svg files it got when it opened the page, and F5 keeps that list. Open the page in a NEW"
+  say "     tab (Ctrl+T), or log out of OpenNMS and in again. A private window does both and starts with no cache: the"
+  say "     quickest test."
+  say "  2. The browser keeps svg files for an hour (OpenNMS sends Cache-Control: max-age=3600) and Ctrl+Shift+R does not"
+  say "     load them again: reload with DevTools (F12) open and Network > Disable cache ticked."
+  if mark_on; then
+    say "  3. The page shows a yellow label at the bottom left: topology.css $(mark_id). No label: that page does not have the"
+    say "     file (point 1). Other characters: it has an older copy (point 2)."
+  else
+    say "  3. To see which version of the CSS a page has, put the line  /* mark */  into $STYLE_CSS and deploy: the page then"
+    say "     shows a yellow label at the bottom left, topology.css and 6 characters. No label: it does not have the file."
+  fi
+  say "FILES.md, section 6, and step 6 of GUIDE-Maven-abc-styles.md say more."
+}
+
+# A header of an HTTP answer that curl wrote with -D: http_header <name> <file>
+http_header() { awk -v k="$1" '{ l = $0; sub(/\r$/, "", l); i = index(l, ":"); if (i > 1 && tolower(substr(l, 1, i - 1)) == tolower(k)) { v = substr(l, i + 1); sub(/^ +/, "", v); print v; exit } }' "$2"; }
+
+# What the web server answers for the style file, asked the way a browser asks: over the network from this machine; if
+# that fails, from inside the container.
+css_served() { # css_served <dev|prod> <url> <container> <md5 of the text it should serve>
+  local to=$1 u=$2/svg/${STYLE_SVG##*/} c=$3 mine=$4 via head=$TMP/served.head body=$TMP/served.body code type cache last loc size sum
+  # shellcheck disable=SC2016 # runs in the container
+  local ask='curl -sS -m 10 -D - -o /tmp/kit-served "$1" && echo "kit-md5 $(md5sum </tmp/kit-served | cut -c1-32)"; rm -f /tmp/kit-served'
+  if curl -sS -m 10 -D "$head" -o "$body" "$u" 2>/dev/null; then
+    via="from this machine"
+    sum=$(md5sum <"$body" | cut -c1-32)
+    size=$(wc -c <"$body" | tr -d ' ')
+  elif tp "$to" exec "$c" sh -c "$ask" sh "http://localhost:8980/opennms/svg/${STYLE_SVG##*/}" >"$head" 2>/dev/null; then
+    via="from inside $(container_of "$to")"
+    sum=$(awk '$1 == "kit-md5" { print $2 }' "$head")
+    size=$(http_header Content-Length "$head")
+  else
+    say "  Could not ask for $u, from this machine nor from inside the container: is OpenNMS up?"
+    return 0
+  fi
+  code=$(awk 'NR == 1 { print $2; exit }' "$head")
+  case $code in
+    [0-9][0-9][0-9]) ;;
+    *) say "  Could not read an answer for $u (asked $via)."; return 0 ;;
+  esac
+  type=$(http_header Content-Type "$head")
+  cache=$(http_header Cache-Control "$head")
+  last=$(http_header Last-Modified "$head")
+  say "  Asked $via for $u:"
+  case $code in
+    200)
+      if [ "$sum" = "$mine" ]; then say "    200, ${type:-no type}, ${size:-?} bytes: the text that $STYLE_CSS gives."
+      else say "    200, ${type:-no type}, ${size:-?} bytes, but not the text that $STYLE_CSS gives: an older file (./topo.sh deploy $to)."; fi
+      say "    Cache-Control: ${cache:-none}${last:+; Last-Modified: $last}"
+      case "$(tr '[:upper:]' '[:lower:]' <<<"$type")" in *xml*) ;; *) say "    ! The type is not XML: the page cannot read the file." ;; esac ;;
+    30?)
+      loc=$(http_header Location "$head")
+      say "    $code, redirects to ${loc:-somewhere else} (the login page?): a browser would not get the file." ;;
+    *) say "    $code: OpenNMS does not serve it, although the container has it (still starting? ./topo.sh deploy $to once more)." ;;
+  esac
+}
+
+# The svg files there against the pulled copy in opennms/: names and md5 sums.
+css_files() { # css_files <dev|prod> <container> <home>
+  local to=$1 c=$2 home=$3 there_md5 here_md5 diffs kind f
+  # shellcheck disable=SC2016 # runs in the container
+  there_md5=$(tp "$to" exec "$c" sh -c 'cd "$1/$2" && md5sum -- *.svg' sh "$home" "$SVG_DIR" 2>/dev/null || true)
+  here_md5=$( (cd "$WS/$SVG_DIR" 2>/dev/null && md5sum -- *.svg 2>/dev/null) || true)
+  diffs=$(
+    { awk '{ print "there", $0 }' <<<"$there_md5"; awk '{ print "here", $0 }' <<<"$here_md5"; } | awk -v pre="$STYLE_PREFIX" '
+      NF == 3 && index($3, pre) != 1 { m[$1, $3] = $2; names[$3] = 1 }
+      END {
+        for (f in names) {
+          t = (("there", f) in m); h = (("here", f) in m)
+          if (t && !h) print "there " f
+          else if (h && !t) print "here " f
+          else if (m["there", f] != m["here", f]) print "differs " f
+        }
+      }' | sort
+  )
+  if [ -z "$diffs" ]; then
+    say "  Its svg files are those in $WS/$SVG_DIR."
+    return 0
+  fi
+  say "  Its svg files against those in $WS/$SVG_DIR:"
+  while read -r kind f; do
+    case $kind in
+      there) say "    only there: $f  (./topo.sh pull copies it here)" ;;
+      here) say "    only here: $f  (./topo.sh deploy $to sends it)" ;;
+      differs) say "    differs: $f  (you changed it, or that OpenNMS did: ./topo.sh diff; ./topo.sh revert $WS/$SVG_DIR/$f drops yours)" ;;
+    esac
+  done <<<"$diffs"
 }
 
 revert() {

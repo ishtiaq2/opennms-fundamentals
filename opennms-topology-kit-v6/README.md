@@ -29,7 +29,6 @@ The addresses, names and images are in `kit.env`.
 
    ```bash
    tar xzf opennms-topology-kit.tar.gz && cd opennms-topology-kit
-   chmod +x dev.sh topo.sh examples/*.sh
    chmod +x dev.sh topo.sh   # only if "Permission denied": some unpackers drop the executable bit
    ./dev.sh up       # the development OpenNMS
    ./topo.sh pull    # the topology files of production: into opennms/, and onto dev
@@ -68,7 +67,7 @@ show has no such field, `./dev.sh up` gives dev's copy one and says so; producti
 ./topo.sh revert         # drop your changes (or one file: ./topo.sh revert <file>)
 ./topo.sh watch          # deploy every save to dev, while you edit files in opennms/ and styles/
 ./topo.sh icons          # every icon id, and the icon each node gets (./topo.sh icons prod: production's nodes)
-./topo.sh css            # the svg files, their clashing style rules, and whether dev has styles/topology.css
+./topo.sh css            # the svg files, their clashing rules, whether dev has and serves styles/topology.css (prod: ./topo.sh css prod)
 ./topo.sh css <icon id>  # CSS for the parts of one icon (or <file.svg>), to copy into styles/topology.css
 ./topo.sh view           # the GraphML views: entries of the View menu (add, remove: FILES.md, section 5)
 ./topo.sh view show <name>                     # a view's namespace, node ids and the icon each node gets
@@ -78,6 +77,9 @@ show has no such field, `./dev.sh up` gives dev's copy one and says so; producti
 Reload the topology page after a deploy. Svg files, `styles/topology.css` included, need more (FILES.md, section 6): a
 new one reaches the page only in a new browser tab, and a changed one only with the browser cache off (F12 > Network >
 Disable cache), because OpenNMS lets the browser keep svg files for an hour. `./topo.sh deploy` says which applies.
+Dev and production are two OpenNMS: your CSS can show on dev and not on production until production's tab is new and its
+cache is off (or in a private window). A line with only the comment `/* mark */` in `styles/topology.css` shows a yellow
+label with its version at the bottom left of the page: no label, the page lacks the file.
 
 ## 3. Hot deploy to production
 
@@ -199,8 +201,10 @@ ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml  # 
   (password admin), then `bundle:diag 81`. The topology page works without it.
 - **Your CSS (`styles/topology.css`) or a new icon does not show**: a browser tab keeps the list of svg files it got
   when it opened the topology page, so open the page in a new tab after the first deploy of a new svg file; after a
-  change, reload with the browser cache off (F12 > Network > Disable cache). `./topo.sh css` says whether the OpenNMS
-  has your CSS (FILES.md, section 6).
+  change, reload with the browser cache off (F12 > Network > Disable cache). `./topo.sh css` (`css prod`) says whether
+  that OpenNMS has your CSS and what its web server answers for it; a private window shows what a new tab and an empty
+  cache show; the line `/* mark */` in `styles/topology.css` puts a version label on the page (FILES.md, section 6;
+  guide, step 6.4).
 - **A GraphML view is not in the View menu**: `./topo.sh view list` shows whether its cfg file is there; reload the
   page. `./dev.sh logs` (karaf.log) names the error if OpenNMS could not read the file.
 - **The page is "unreachable" from your computer**: the firewall. Run
