@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Example: one icon styled with CSS: its main colour, frame, background, size and edges; its svg file stays as it is
 # File: styles/topology.css, deployed as jetty-webapps/opennms/svg/zz-topology-styles.svg  (FILES.md, section 6; GUIDE-Maven-abc-styles.md, step 7)
-# Look: open the topology page in a new tab once, then reload with the cache off (F12 > Network > Disable cache): every node drawn with the icon is 25 % bigger, dark blue (red with a critical alarm, orange under the mouse and when selected), in a thin rounded frame on white, with a bold label.
+# Look: open the topology page in a new tab once, then reload (./topo.sh css says whether your OpenNMS lets the browser keep svg files): every node drawn with the icon is 25 % bigger, dark blue (red with a critical alarm, orange under the mouse and when selected), in a thin rounded frame on white, with a bold label.
 # shellcheck source=tools/example-lib.sh
 source "$(dirname "$0")/../tools/example-lib.sh"
 # Another icon: ICON=das_helix ./topo.sh example 12. ./topo.sh css <icon id> prints every part of an icon.
