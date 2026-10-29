@@ -75,11 +75,14 @@ show has no such field, `./dev.sh up` gives dev's copy one and says so; producti
 ```
 
 Reload the topology page after a deploy. Svg files, `styles/topology.css` included, need more (FILES.md, section 6): a
-new one reaches the page only in a new browser tab, and a changed one only with the browser cache off (F12 > Network >
-Disable cache), because OpenNMS lets the browser keep svg files for an hour. `./topo.sh deploy` says which applies.
-Dev and production are two OpenNMS: your CSS can show on dev and not on production until production's tab is new and its
-cache is off (or in a private window). A line with only the comment `/* mark */` in `styles/topology.css` shows a yellow
-label with its version at the bottom left of the page: no label, the page lacks the file.
+new one reaches the page only in a new browser tab; a changed one shows on reload, unless OpenNMS lets the browser keep
+svg files (`./topo.sh css` prints the `Cache-Control` it sends; the OpenNMS of this kit answers `no-store`, so it does
+not). `./topo.sh deploy` says which applies.
+Dev and production are two OpenNMS. `watch` and `deploy dev` change dev only: your CSS shows on production after
+`./topo.sh deploy prod`, in a tab that was opened after the file got there (a private window is one). `./topo.sh css prod`
+says whether production has your latest CSS. A line with only the comment `/* mark */` in `styles/topology.css` shows a
+yellow label with its version at the bottom left of the page: no label, the page lacks the file. `./topo.sh pagecheck`
+prints JavaScript for the browser console (F12) that says what the topology page loaded and what a label looks like there.
 
 ## 3. Hot deploy to production
 
@@ -199,12 +202,13 @@ ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml  # 
 - **A health check says "Bundle 81 is waiting for dependencies"**: a Karaf bundle of the image cannot start in dev, often
   one that needs production's other containers. To see which one and what it waits for: `ssh -p 8101 admin@localhost`
   (password admin), then `bundle:diag 81`. The topology page works without it.
-- **Your CSS (`styles/topology.css`) or a new icon does not show**: a browser tab keeps the list of svg files it got
-  when it opened the topology page, so open the page in a new tab after the first deploy of a new svg file; after a
-  change, reload with the browser cache off (F12 > Network > Disable cache). `./topo.sh css` (`css prod`) says whether
-  that OpenNMS has your CSS and what its web server answers for it; a private window shows what a new tab and an empty
-  cache show; the line `/* mark */` in `styles/topology.css` puts a version label on the page (FILES.md, section 6;
-  guide, step 6.4).
+- **Your CSS (`styles/topology.css`) or a new icon does not show**: first `./topo.sh css` (`css prod`): it says whether
+  that OpenNMS has your latest CSS (production only gets it with `./topo.sh deploy prod`) and what its web server answers
+  for it. A browser tab keeps the list of svg files it got when it opened the topology page, so open the page in a new
+  tab after the first deploy of a new svg file (a private window is one). If `css` shows that OpenNMS lets the browser
+  keep svg files (`max-age`), reload with the browser cache off (F12 > Network > Disable cache). The line `/* mark */`
+  in `styles/topology.css` puts a version label on the page, and `./topo.sh pagecheck` prints JavaScript for the browser
+  console that says what the page loaded (FILES.md, section 6; guide, step 6.4).
 - **A GraphML view is not in the View menu**: `./topo.sh view list` shows whether its cfg file is there; reload the
   page. `./dev.sh logs` (karaf.log) names the error if OpenNMS could not read the file.
 - **The page is "unreachable" from your computer**: the firewall. Run

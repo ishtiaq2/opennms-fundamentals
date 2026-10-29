@@ -48,13 +48,13 @@ Skip what you have done already.
    ssh maven-admin@192.168.0.36 podman ps     # lists the production containers: it works
    ```
 
-4. **The kit, version 3.8 or later** (it goes over version 3.7; with 3.6 or older, unpack the 3.7 update first). Copy
+4. **The kit, version 3.9 or later** (it goes over version 3.8; with 3.7 or older, unpack the 3.8 update first). Copy
    the update archive from the computer with the browser to the development machine, for example with
-   `scp opennms-topology-kit-v3.8-update.tar.gz admin@192.168.0.47:` on that computer. Then, on the development
+   `scp opennms-topology-kit-v3.9-update.tar.gz admin@192.168.0.47:` on that computer. Then, on the development
    machine, unpack it over the kit folder:
 
    ```bash
-   tar xzf ~/opennms-topology-kit-v3.8-update.tar.gz -C ~/opennms-fundamentals/opennms-fundamentals/opennms-topology-kit-v6
+   tar xzf ~/opennms-topology-kit-v3.9-update.tar.gz -C ~/opennms-fundamentals/opennms-fundamentals/opennms-topology-kit-v6
    chmod +x dev.sh topo.sh examples/*.sh   # only if "Permission denied"
    ```
 
@@ -209,9 +209,9 @@ Put your rules into `styles/topology.css` and save; `watch` deploys them. The ki
 `jetty-webapps/opennms/svg/zz-topology-styles.svg`, a small svg file that holds your rules in a `<style>` block.
 OpenNMS puts every svg file of that folder into the topology page, so the rules apply there.
 
-### 6.1 Seeing a change: a new tab once, then the cache off
+### 6.1 Seeing a change: a new tab once; the cache only if OpenNMS lets the browser keep files
 
-Two things in OpenNMS decide when the browser shows a changed svg file, and your CSS is one:
+Two things decide when a page shows a new or changed svg file, and your CSS is one:
 
 1. **A new svg file needs a new tab.** A browser tab reads the list of svg files when it opens the topology page,
    and keeps that list when you reload it: OpenNMS keeps the state of the page between reloads (`@PreserveOnRefresh`
@@ -221,13 +221,16 @@ Two things in OpenNMS decide when the browser shows a changed svg file, and your
    again, or a private window, gives a new page too. Development and production are two OpenNMS: do it for each.
    Kit 3.6 gave this file a new name at every change, so a tab that was already open never saw your rules: that is
    why this step did nothing for you. Kit 3.7 keeps one name.
-2. **A changed svg file needs the cache off.** OpenNMS sends svg files with `Cache-Control: max-age=3600`, so the
-   browser keeps each one for an hour. Ctrl+Shift+R is not enough: the page asks for its svg files after it has
-   loaded, and Chrome skips its cache only for what a page asks for while it loads. While you work on styles, open
-   the developer tools (F12), tick **Network > Disable cache**, keep the developer tools open and reload normally.
-   (With them open, right-click on the reload button > *Empty cache and hard reload* does it once.)
+2. **A changed svg file shows on a plain reload, unless the browser may keep it.** What OpenNMS sends decides, and
+   `./topo.sh css` (`css prod`) prints it. Your dev and your production answer `Cache-Control: no-store`: the browser
+   keeps nothing, a reload loads the file again, and there is nothing to switch off. (Kit 3.8 and older assumed
+   `max-age=3600` from the OpenNMS sources, which the answer of your servers does not confirm.) If it ever shows
+   `max-age=3600`, the browser keeps each svg file for an hour, and Ctrl+Shift+R is not enough: the page asks for its
+   svg files after it has loaded, and Chrome skips its cache only for what a page asks for while it loads. Then open
+   the developer tools (F12), tick **Network > Disable cache**, keep them open and reload normally. (With them open,
+   right-click on the reload button > *Empty cache and hard reload* does it once.)
 
-After each deploy, `./topo.sh` tells you which one applies: "New there: ..." or "reload with the cache off".
+After each deploy, `./topo.sh` tells you which one applies: "New there: ..." or "Reload the topology page".
 
 ### 6.2 Check that your CSS is there
 
@@ -240,7 +243,9 @@ Each of them also asks the web server of that OpenNMS for `zz-topology-styles.sv
 the answer: 200, the type, the size, the cache header, and whether it is the text your `styles/topology.css` gives. It
 lists the svg files that differ between that OpenNMS and `opennms/`, for example a second `das-topology.<other
 hash>.svg` that production got after your pull, and the rules of the svg files that style the page itself (nodes,
-links, labels) and so compete with yours.
+links, labels) and so compete with yours. If that OpenNMS has no file or an older one than your `styles/topology.css`
+(dev gets every save from `watch`, production only what `./topo.sh deploy prod` sent), the output ends with
+*"does not have your latest styles/topology.css ... Run: ./topo.sh deploy prod"*, and a page cannot show what is not there.
 
 **Which version of your CSS has this page?** Put a line with only this comment into `styles/topology.css`:
 
@@ -250,7 +255,7 @@ links, labels) and so compete with yours.
 
 and deploy (`watch` does). A small yellow label at the bottom left of the topology page reads, for example, `topology.css bb72b1`: the
 first 6 characters of the md5 of your file, which `./topo.sh css` prints too. No label: that page did not load the file
-(a new tab, step 6.1). Other characters: that page has an older copy (the cache, step 6.1). Delete the line when you
+(a new tab, step 6.1). Other characters: that page holds an older copy (reload it, step 6.1). Delete the line when you
 are done; the label goes with the next deploy.
 
 In the browser, http://192.168.0.47:8980/opennms/svg/zz-topology-styles.svg is an empty page whose source (Ctrl+U)
@@ -258,6 +263,24 @@ shows your rules. On the topology page: F12 > Elements, Ctrl+F `zz-topology-styl
 the map as `<svg width="0" height="0">` with your `<style>`. Select a node's `<use class="upIcon">`: the Styles pane
 lists the rules that apply to it. F12 > Network, filter `svg`, shows which svg files the page asked for and the answer
 (200, or `(disk cache)`).
+
+**What does this page hold?** `./topo.sh pagecheck` prints a few lines of JavaScript. Open the topology page in a tab of
+its own (http://192.168.0.36:8980/opennms/topology for production) and choose a view with nodes, press F12, choose
+*Console*, paste them, press Enter (if the console says "allow pasting", type that and press Enter first). It only reads
+the page and asks the web server for the style file. It prints:
+
+- *svg files this page asked for*, and whether `zz-topology-styles.svg` is one of them, with its status;
+- *asked now for ...*: the answer the web server gives this browser, with the size (it must be the size that
+  `./topo.sh css` printed) and the `Cache-Control` header;
+- *your CSS in the page*: `cannot tell` (this window has no `<defs>`: it is not the topology page, or the map is not
+  drawn yet, or an iframe holds the page, in which case choose that frame in the list at the top of the Console; the
+  lines below then say nothing about the topology), `NO` (the page did not take the file in), `no style sheet` (the
+  browser refused the `<style>`: a Content-Security-Policy), or `yes, N rules understood of M` (fewer than M: the
+  browser dropped rules it does not know; `:has()` needs Chrome or Edge 105, Firefox 121 or Safari 15.4, `scale` and
+  `translate` need Chrome or Edge 104, Firefox 72 or Safari 14.1), with the label of `/* mark */`, and a warning when
+  the page holds an older copy than the server gives now;
+- *nodes on the page*, with the icon each is drawn with (a rule for `#das_helix` reaches the nodes drawn with it only),
+  and the `font-size`, `scale`, link colour and width that the first label, icon and link really have.
 
 ### 6.3 Rules for every node and link
 
@@ -294,22 +317,31 @@ OpenNMS draws.
 
 ### 6.4 The styles show on dev but not on production
 
-The two OpenNMS are separate: a new tab, the cache and the file are each their own, so what you did for dev is not
-done for production. In this order:
+The two OpenNMS are separate: the file, the page and the tab are each their own. `./topo.sh watch` and
+`./topo.sh deploy dev` change dev only; production gets your CSS with `./topo.sh deploy prod`, and with nothing else.
+In this order:
 
 1. `./topo.sh css prod` must say *"has it, as in styles/topology.css"* and that the web server answers *200 ... the text
-   that styles/topology.css gives*. If not: `./topo.sh deploy prod`.
+   that styles/topology.css gives*. If it says *"has an older version"*, production still has the file of your last
+   deploy to it, not of your last edit: run `./topo.sh deploy prod`, answer `y`, then `./topo.sh css prod` again.
 2. Open a **private window** (Ctrl+Shift+N in Chrome and Edge, Ctrl+Shift+P in Firefox), log in to
    http://192.168.0.36:8980/opennms and open the topology page. A private window starts with no cache and a new
    session, so it loads the file list and the CSS as they are now.
-3. Styles show there, not in your normal window: that window's tab or cache is old. Close every tab of the production
-   topology, open a new tab, press F12 and tick Network > Disable cache (step 6.1).
-4. No styles in the private window either: put the `/* mark */` line into `styles/topology.css`, run
-   `./topo.sh deploy prod` and open production in a new private window.
-   - *No label*: the page did not get the file. F12 > Network, reload, filter `svg`: is `zz-topology-styles.svg` among the
-     requests, and with which status? Something other than 200 (or `(disk cache)`): `./topo.sh css prod` shows what the
-     web server answers. Not asked for at all, in a window that is new: OpenNMS's list of svg files does not hold it;
-     `./topo.sh css prod` shows whether the container's svg folder has it.
+3. Styles show there, not in your normal window: that window's tab is old (it keeps the list of svg files it got when
+   it opened the page). Close every tab of the production topology and open a new one (step 6.1).
+4. No styles in the private window either, and `css prod` says *"has it"*: put the `/* mark */` line into
+   `styles/topology.css`, run `./topo.sh deploy prod`, open production in a new private window and run the page check
+   there (`./topo.sh pagecheck`, step 6.2). What its lines say:
+   - *"your CSS in the page: NO"*: the page did not take the file in, and there is no label. With *"asked now ... 200"* and
+     *"not in the browser's list"*, the page never asked for it: OpenNMS's list of svg files for that page does not hold
+     it (the page is older than the file: a new tab, step 6.1; or `./topo.sh css prod` shows that the container's svg
+     folder lacks it). If the page asked and the status is not 200, `./topo.sh css prod` shows what the web server
+     answers. (F12 > Network, filter `svg`, shows the same requests.)
+   - *"no style sheet"*: the browser refused the `<style>` of the file, a Content-Security-Policy of the page. It would
+     refuse the `<style>` of every svg file, the stock ones too. Ask whoever runs the web server or proxy in front of
+     production.
+   - *"N rules understood of M"* with N below M: the browser dropped rules it does not know (step 6.2 names the browser
+     versions): use a newer browser, or leave those rules out.
    - *The label, but a rule does nothing*: another rule wins on that page. F12 > Elements, select the element (the
      `<text class="vertex-label">` of a node, a `<path class="edge normal">`); the Styles pane shows the winning rule and
      which `<style>` it comes from. `./topo.sh css` lists the rules of the svg files that style the page
@@ -465,12 +497,12 @@ between `/* example: one icon: <icon id> */` and `/* end: one icon: <icon id> */
 | your CSS | `styles/topology.css` | `/opt/opennms/jetty-webapps/opennms/svg/zz-topology-styles.svg` | http://192.168.0.47:8980/opennms/svg/zz-topology-styles.svg |
 | an icon file | `opennms/jetty-webapps/opennms/svg/nimbus.svg` | `/opt/opennms/jetty-webapps/opennms/svg/nimbus.svg` | http://192.168.0.47:8980/opennms/svg/nimbus.svg |
 | the stock stylesheet | `reference/topo_default-styles.css`, a copy | `VAADIN/themes/topo_default/styles.css` inside the theme jar that the first lines of the copy name | F12 > Sources |
-| how long the browser keeps svg files | | `cacheControl` in `/opt/opennms/jetty-webapps/opennms/WEB-INF/web.xml` | F12 > Network > the file > Headers |
+| how long the browser keeps svg files | `./topo.sh css` prints it | the `Cache-Control` that OpenNMS sends (the stock sources: `cacheControl` in `/opt/opennms/jetty-webapps/opennms/WEB-INF/web.xml`; your servers answer `no-store`) | F12 > Network > the file > Headers |
 
 ```bash
 podman exec onms-dev-core cat /opt/opennms/jetty-webapps/opennms/svg/zz-topology-styles.svg     # dev
 ssh maven-admin@192.168.0.36 podman exec opennms cat /opt/opennms/jetty-webapps/opennms/svg/zz-topology-styles.svg
-curl -sI http://192.168.0.47:8980/opennms/svg/nimbus.svg | grep -i cache-control   # max-age=3600: one hour
+curl -sI http://192.168.0.47:8980/opennms/svg/nimbus.svg | grep -i cache-control   # your OpenNMS: no-store; the stock sources: max-age=3600
 ```
 
 To see the copy of a drawing inside a `<use>` in F12 > Elements: Settings (the gear) > Preferences > Elements >
@@ -486,7 +518,7 @@ differ):
 | [`D3.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/gwt/client/d3/D3.java) | `injectSVGDef`: each file, whole, into `<defs>` |
 | [`GWTVertex.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/gwt/client/GWTVertex.java) | the elements of a node, and the scale to 48 px |
 | [`styles.css`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/themes/default-theme/src/main/filtered/VAADIN/themes/topo_default/styles.css) | the stock rules: frames and links in the alarm colours |
-| [`web.xml`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/opennms-webapp/src/main/webapp/WEB-INF/web.xml) | `cacheControl` `max-age=3600,public` for files such as the svg files |
+| [`web.xml`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/opennms-webapp/src/main/webapp/WEB-INF/web.xml) | `cacheControl` `max-age=3600,public` for files such as the svg files (your image answers `no-store`: it differs from this tag) |
 
 ## 8. Change the view file itself (only if you must)
 
@@ -534,9 +566,9 @@ the properties of a GraphML view.
    - *"You and production both changed these files after your last pull or deploy, so they are held back"*: compare them
      (`./topo.sh view show Maven-abc prod` for the view); `FORCE=1 ./topo.sh deploy prod` sends yours anyway.
 4. Open **http://192.168.0.36:8980/opennms/topology** in a new tab and choose the view in the View menu. A new tab
-   matters the first time `zz-topology-styles.svg` (or another new svg file) goes to production; after that, reload
-   with the cache off (step 6.1). Other people see a changed svg file within an hour. Dev shows your styles and
-   production does not: step 6.4.
+   matters the first time `zz-topology-styles.svg` (or another new svg file) goes to production; after that, a reload
+   shows a changed file (step 6.1). Other people see it the next time they load the page. `./topo.sh css prod` says
+   whether production has your latest CSS. Dev shows your styles and production does not: step 6.4.
 5. If something is wrong: `./topo.sh undo` puts back what the last deploy replaced and removes what it added. Run it
    again to go one deploy further back.
 6. To start from production's files again, for example after its software wrote Maven-abc.xml: `./topo.sh pull`
@@ -551,8 +583,8 @@ the properties of a GraphML view.
 | a mapping line does nothing | its namespace is not the view's (for example the one of an example), a colon without a backslash, or another node id | `./topo.sh view show Maven-abc` names such a line ("does nothing: the namespace of this view is ..."); delete it and use `./topo.sh view icon` |
 | the icon of a node does not change after a mapping line | the line is not the one for this node, or the page was not reloaded | `./topo.sh view show Maven-abc`: the row of the node must say `(the line Maven-abc.<id> in ...)`; then reload the page |
 | no rule of `styles/topology.css` does anything | the tab opened the page before `zz-topology-styles.svg` was there, and a reload keeps its list of svg files | open the page in a new tab (step 6.1); `./topo.sh css` says whether the file is there |
-| a change of `styles/topology.css` or of an svg file does not show | the browser keeps svg files for an hour | reload with F12 > Network > Disable cache (step 6.1) |
-| the styles show on dev, not on production | the production tab was opened before the file was there, the browser has an old copy, or a rule of the same weight in another svg file reached the page after yours | a private window, `./topo.sh css prod`, the `/* mark */` label (steps 6.2 and 6.4) |
+| a change of `styles/topology.css` or of an svg file does not show | that OpenNMS does not have it yet (`watch` and `deploy dev` change dev only), or the browser may keep svg files (`./topo.sh css` prints the `Cache-Control`; yours says `no-store`: it does not) | `./topo.sh css prod` says "has an older version": `./topo.sh deploy prod`; else reload with F12 > Network > Disable cache (step 6.1) |
+| the styles show on dev, not on production | production does not have your latest CSS (it has the file of your last deploy to it), or its tab was opened before the file was there, or a rule of the same weight in another svg file reached the page after yours | `./topo.sh css prod` and `./topo.sh deploy prod`, a private window, `./topo.sh pagecheck` and the `/* mark */` label (steps 6.2 and 6.4) |
 | a CSS rule does nothing | a stock rule with more classes wins, or a rule for a part of a drawing does not name its id | name the classes of the stock rule, after `svg` (step 6.3); start a rule for a part with the drawing's id (`./topo.sh css <icon id>`, step 7.2); F12 shows which rule wins |
 | an icon shows colours of another icon file | both files define `.cls-1` (or another class) differently, and the one loaded last wins | `./topo.sh css` lists such classes; rules with the id in front settle it (step 7.2) |
 | the view is not in the View menu | its cfg file is missing, or it is being loaded anew (5 seconds) | `./topo.sh view list`; reload the page; `./dev.sh logs` names errors in the file |
@@ -571,6 +603,7 @@ the properties of a GraphML view.
 | `./topo.sh icons` | every icon id, by svg file, and the icon each node gets |
 | `./topo.sh css`, `./topo.sh css prod` | the svg files, clashing style rules, the rules that style the page, and whether that OpenNMS has and serves your styles |
 | `./topo.sh css <icon id or file.svg>` | CSS for the parts of one icon, to copy into `styles/topology.css` |
+| `./topo.sh pagecheck` | JavaScript to paste into the browser console on the topology page: which svg files the page loaded, whether your CSS reached it, what a label really looks like there |
 | `./topo.sh example 12` | one icon styled with CSS: colours, frame, background, size, edges |
 | `./topo.sh watch` | deploy every save to dev |
 | `./topo.sh diff`, `./topo.sh revert [file]` | what production does not have yet (since the last pull or deploy); drop it |

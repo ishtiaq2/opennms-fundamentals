@@ -6,12 +6,12 @@ example (`./topo.sh example N`) that changes that file, so you can watch what ha
 
 | # | File | What it decides | A change shows | Examples |
 |---|---|---|---|---|
-| 1 | `jetty-webapps/opennms/svg/*.svg` | the icons: artwork, colours, normal / mouse-over / selected | a new file: in a new browser tab; a changed file: on reload with the browser cache off (section 6) | 05, 06 |
+| 1 | `jetty-webapps/opennms/svg/*.svg` | the icons: artwork, colours, normal / mouse-over / selected | a new file: in a new browser tab; a changed file: on reload (with the browser cache off if OpenNMS lets the browser keep svg files, section 6) | 05, 06 |
 | 2 | `etc/org.opennms.features.topology.app.icons.*.cfg` | which node gets which icon | within a second | 01, 02, 03 |
 | 3 | `etc/org.opennms.features.topology.app.icons.list` | the icons in right-click > Change Icon | when the dialog opens | 04 |
 | 4 | `etc/org.opennms.features.topology.app.cfg` | header, automatic refresh | after the topology app restarts itself (~10 s) | 10 |
 | 5 | `etc/graphml/<name>.xml` and its two `.cfg` files | an entry of the View menu: its nodes, links and icons | when its cfg file appears (a deploy takes it away for 5 s and back) | 11 |
-| 6 | stock stylesheet in the theme jar, overridden by `styles/topology.css` | colours and widths of links, alarm frames, labels; the parts, frame and size of one icon | override: in a new tab after its first deploy, then on reload with the cache off | 07, 08, 09, 12 |
+| 6 | stock stylesheet in the theme jar, overridden by `styles/topology.css` | colours and widths of links, alarm frames, labels; the parts, frame and size of one icon | override: in a new tab after its first deploy, then on reload | 07, 08, 09, 12 |
 | 7 | Java/GWT source, compiled into bundles under `system/` | how nodes and links are drawn, the 48 px icon size | after a Maven build and restart | (08 does it with CSS) |
 
 Files 1-5 and the override of 6 are hot: `./topo.sh deploy` copies them into the running container and
@@ -48,8 +48,8 @@ The stock files are:
 - `atlas_icons.svg`, `vmware_icons.svg` and `legacy_icons.svg`
 
 Your production image adds `helix.svg`, `orion.svg` and `nimbus.svg`. `./topo.sh icons` lists every icon id
-and points out a file that lacks one of the four groups. The browser keeps svg files for an hour: after a change,
-reload with the cache off (section 6).
+and points out a file that lacks one of the four groups. After a change, reload the page (section 6 says when the
+browser cache matters).
 
 - **Example 05** recolours the stock icons by changing two colours in `opennms_icons.svg`.
 - **Example 06** adds `stratus.svg`, a placeholder with the four groups (`examples/assets/stratus.svg`), maps the Stratus model to it and adds it to the Change Icon list.
@@ -221,10 +221,12 @@ beat the stock rules: `svg path.edge.up` beats `.edge.up`. A selector also needs
   (`getState().setSVGDefFiles(...)` runs once, when the component is made). A new svg file reaches an open tab only
   through a new tab. (Kit 3.6 and older named this file `zz-topology-styles.<hash>.svg`, a new name at each change,
   so an open tab never got a change. Kit 3.7 keeps one name, and the next deploy removes the old ones.)
-- Jetty sends the files of the web application with `Cache-Control: max-age=3600,public` (`cacheControl` of the
-  `default` servlet in `jetty-webapps/opennms/WEB-INF/web.xml`), so the browser keeps an svg file for an hour.
-  Ctrl+Shift+R is not enough: the page asks for its svg files after it has loaded, and Chrome bypasses its cache
-  only for what a page asks for while it loads. Reload with DevTools (F12) open and Network > Disable cache ticked.
+- What OpenNMS sends with the file decides whether a browser keeps its copy; `./topo.sh css` prints it. The OpenNMS of
+  this kit (dev and production) answers `Cache-Control: no-store`: a reload loads the file again. The stock 33.1.8
+  sources send `max-age=3600,public` (`cacheControl` of the `default` servlet in
+  `jetty-webapps/opennms/WEB-INF/web.xml`), and then the browser keeps an svg file for an hour. Ctrl+Shift+R is not
+  enough in that case: the page asks for its svg files after it has loaded, and Chrome bypasses its cache only for
+  what a page asks for while it loads. Reload with DevTools (F12) open and Network > Disable cache ticked.
 
 `./topo.sh deploy` says after each deploy which of the two applies, and `./topo.sh css [dev|prod]` whether that
 OpenNMS has your current `styles/topology.css`, what its web server answers for the file (status, type, size, cache
@@ -232,11 +234,16 @@ header, same text or not), which svg files there differ from `opennms/`, and whi
 itself. Dev always gets the file; production gets it with your first rules, and keeps it from then on, so that open tabs
 keep it in their list.
 
-Development and production are two OpenNMS, each with its own tabs, sessions and browser cache: what shows on dev can
-be missing on production because the production tab is older than the file, or the browser has an old copy of it. A
-private window has neither problem. A line with only the comment `/* mark */` in `styles/topology.css` makes the page show
-a yellow label, `topology.css` and 6 characters of the md5 of your file (printed by `./topo.sh css`): no label means the
-page does not have the file, other characters an old copy (guide, steps 6.2 and 6.4).
+Development and production are two OpenNMS, each with its own file, tabs and sessions: `./topo.sh watch` and
+`./topo.sh deploy dev` change dev only, so production shows your CSS only after `./topo.sh deploy prod`
+(`./topo.sh css prod` says "has an older version" until then), and what shows on dev can be missing on production
+because the production tab is older than the file. A private window has no old tab. A line with only the comment
+`/* mark */` in `styles/topology.css` makes the page show a yellow label, `topology.css` and 6 characters of the md5 of
+your file (printed by `./topo.sh css`): no label means the page does not have the file, other characters an old copy.
+`./topo.sh pagecheck` prints JavaScript for the browser console (F12) on the topology page: it says which svg files the
+page asked for, what the web server gives that browser for `zz-topology-styles.svg`, whether the page took the file in
+(and whether the browser made a style sheet of it or refused it), how many of its rules the browser understood, and
+what `font-size`, `scale` and link colour the first label, icon and link really have (guide, steps 6.2 and 6.4).
 
 **One icon.** Each svg file sits whole in the `<defs>` of the page; a node shows copies of one of its drawings
 (`<use href="#X">`). A rule whose selector holds the drawing's id styles a part of it in every copy, and wins over the
@@ -299,7 +306,7 @@ Stock 33.1.8, at tag `opennms-33.1.8-1` of https://github.com/OpenNMS/opennms. Y
 | [`.../internal/GraphPainter.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/GraphPainter.java) | the classes of nodes and links (`vertex selected`, `edge selected up`) |
 | [`.../support/IconRepositoryManager.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/support/IconRepositoryManager.java) | the svg folder (`getSVGIconFiles`) and the icon lookup of section 2 |
 | [`.../internal/TopologyUI.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/TopologyUI.java) | `@PreserveOnRefresh`: a reload keeps the page's state, its list of svg files included |
-| [`web.xml`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/opennms-webapp/src/main/webapp/WEB-INF/web.xml) | `cacheControl` `max-age=3600,public` of the `default` servlet: the browser keeps svg files for an hour |
+| [`web.xml`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/opennms-webapp/src/main/webapp/WEB-INF/web.xml) | `cacheControl` `max-age=3600,public` of the `default` servlet: the browser keeps svg files for an hour (the image of this kit answers `no-store`) |
 | [`DefaultIconRepository.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.api/src/main/java/org/opennms/features/topology/api/support/DefaultIconRepository.java) | reads and writes a mapping file |
 | [`LinkdEdgeStatusProvider.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/plugins/org.opennms.features.topology.plugins.topo.linkd/src/main/java/org/opennms/features/topology/plugins/topo/linkd/internal/LinkdEdgeStatusProvider.java) | links `up` / `down` |
 | [`Topology.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/enlinkd/service/api/src/main/java/org/opennms/netmgt/enlinkd/service/api/Topology.java) | `getIconKey`: the Enhanced Linkd icon keys |

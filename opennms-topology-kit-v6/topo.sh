@@ -13,6 +13,7 @@
 #   ./topo.sh icons [dev|prod]      the icons in the svg files, and the icon each node gets
 #   ./topo.sh css [dev|prod]        the svg files, style rules that clash, and whether styles/topology.css is there and served
 #   ./topo.sh css <file.svg | icon id>  CSS for the parts of one icon, to copy into styles/topology.css
+#   ./topo.sh pagecheck             lines to paste into the browser console on the topology page: what it loaded, what it shows
 #   ./topo.sh view [list [dev|prod]]          the GraphML views there: entries of the View menu
 #   ./topo.sh view show <name> [dev|prod]     a view's nodes: id, label, icon key, the icon drawn
 #   ./topo.sh view icon <name> <node id> <icon id>   another icon for one node of a view (--reset: the view's own)
@@ -223,7 +224,7 @@ sys.stdout.write(zipfile.ZipFile(sys.argv[1]).read("VAADIN/themes/topo_default/s
 }
 
 deploy() {
-  local to=${1:-} yes=0 quiet=0 a c home stage remote f v sum base_sum style='' ts bk ovl_mounts='' plan files=() changed=() stale=() ovl_plan=() names=() reload=() mine=() theirs=() both=() svg_new=() svg_old=()
+  local to=${1:-} yes=0 quiet=0 a c home stage remote f v sum base_sum style='' ts bk ovl_mounts='' plan hdr='' cache_ctl='' files=() changed=() stale=() ovl_plan=() names=() reload=() mine=() theirs=() both=() svg_new=() svg_old=()
   case $to in dev | prod) ;; *) die "usage: ./topo.sh deploy dev|prod [-y]" ;; esac
   shift
   for a in "$@"; do case $a in -y) yes=1 ;; -q) quiet=1 ;; esac; done
@@ -328,10 +329,15 @@ deploy() {
   for f in "${stale[@]}"; do tp "$to" exec "$c" rm -f "$home/$f" </dev/null; done
   # The overlay folders are copied into OpenNMS at every start: they keep the files after a restart.
   if [ ${#ovl_plan[@]} -gt 0 ]; then overlay_write || warn "  (the overlay folders could not be updated: a restart of $PROD_CONTAINER would bring the old files back)"; fi
+  # Does OpenNMS serve each deployed svg file? Its answer also says whether a browser may keep svg files (Cache-Control).
   for f in "${changed[@]}"; do
     case $f in
-      "$SVG_DIR"/*) tp "$to" exec "$c" curl -fsS -o /dev/null "http://localhost:8980/opennms/svg/${f##*/}" 2>/dev/null ||
-        warn "  OpenNMS does not serve /opennms/svg/${f##*/} (still starting?)" ;;
+      "$SVG_DIR"/*)
+        if hdr=$(tp "$to" exec "$c" curl -fsS -D - -o /dev/null "http://localhost:8980/opennms/svg/${f##*/}" 2>/dev/null </dev/null); then
+          [ -n "$cache_ctl" ] || cache_ctl=$(http_header Cache-Control <(printf '%s\n' "$hdr"))
+        elif ! tp "$to" exec "$c" curl -fsS -o /dev/null "http://localhost:8980/opennms/svg/${f##*/}" 2>/dev/null </dev/null; then
+          warn "  OpenNMS does not serve /opennms/svg/${f##*/} (still starting?)"
+        fi ;;
     esac
   done
   if [ "$to" = prod ]; then base_put "$stage" "${changed[@]}"; fi # production has them now: the baseline follows
@@ -342,11 +348,26 @@ deploy() {
     say "  tab reads the list of svg files when it opens the page and keeps it on reload, so an open tab never loads a new"
     say "  svg file (FILES.md, section 6)."
   fi
-  if [ ${#svg_old[@]} -gt 0 ] && [ "$quiet" = 1 ]; then
-    say "  (reload with the browser cache off: F12 > Network > Disable cache; svg files stay cached for an hour)"
-  elif [ ${#svg_old[@]} -gt 0 ]; then
-    say "Reload the topology page with the browser cache off: open DevTools (F12) > Network, tick Disable cache, keep"
-    say "DevTools open. The browser keeps svg files for an hour, and Ctrl+Shift+R does not load them again."
+  if [ ${#svg_old[@]} -gt 0 ]; then # a changed svg file: would the browser keep the old one? OpenNMS's answer tells
+    case $(cache_kept "$cache_ctl") in
+      no)
+        if [ "$quiet" = 1 ]; then say "  (reload the topology page)"
+        else say "Reload the topology page. OpenNMS sends svg files with Cache-Control: $cache_ctl: a reload loads them again."; fi ;;
+      yes)
+        if [ "$quiet" = 1 ]; then
+          say "  (reload with the browser cache off: F12 > Network > Disable cache; OpenNMS sends svg files with Cache-Control: $cache_ctl)"
+        else
+          say "Reload the topology page with the browser cache off: open DevTools (F12) > Network, tick Disable cache, keep"
+          say "DevTools open. OpenNMS sends svg files with Cache-Control: $cache_ctl, so the browser keeps them, and"
+          say "Ctrl+Shift+R does not load them again."
+        fi ;;
+      *)
+        if [ "$quiet" = 1 ]; then say "  (reload the topology page; if the old file shows: F12 > Network > Disable cache)"
+        else
+          say "Reload the topology page. If the old file still shows, the browser may have kept it: reload with DevTools (F12) >"
+          say "Network > Disable cache ticked. ./topo.sh css $to shows what OpenNMS sends."
+        fi ;;
+    esac
   fi
   [ "$quiet" = 1 ] || [ ${#svg_old[@]} -gt 0 ] || [ ${#svg_new[@]} -gt 0 ] || say "Reload the topology page."
 }
@@ -396,7 +417,8 @@ watch() {
   local last='' now
   check_target dev
   [ -d "$WS" ] || die "./topo.sh pull first."
-  say "Deploying every save in opennms/ and styles/ to the development OpenNMS. Ctrl+C stops."
+  say "Deploying every save in opennms/ and styles/ to the development OpenNMS (production gets them only with"
+  say "./topo.sh deploy prod). Ctrl+C stops."
   while :; do
     now=$(find "$WS" "$STYLE_CSS" -type f -printf '%p %s %T@\n' 2>/dev/null | sort | md5sum)
     if [ "$now" != "$last" ]; then
@@ -571,7 +593,7 @@ view() {
 
 # ./topo.sh css [dev|prod]: the svg files and their style rules, and whether that OpenNMS has styles/topology.css.
 css_status() {
-  local to=$1 c home url n there_now mine sum old mark
+  local to=$1 c home url n there_now mine sum old mark state=current pt
   [ -d "$WS" ] || die "./topo.sh pull first."
   python3 tools/svgcss.py overview "$WS/$SVG_DIR"
   n=$(python3 tools/svgcss.py count "$STYLE_CSS")
@@ -591,32 +613,73 @@ css_status() {
   there_now=$(tp "$to" exec "$c" sh -c 'cd "$1" && md5sum "$2" 2>/dev/null; ls -1 "$3"*.svg 2>/dev/null; true' sh "$home" "$STYLE_SVG" "$SVG_DIR/$STYLE_PREFIX")
   sum=$(awk 'NF == 2 { print $1; exit }' <<<"$there_now")
   mine=$(style_svg | md5sum | cut -c1-32)
-  if [ -z "$sum" ]; then say "  $(name_of "$to") does not have it yet: ./topo.sh deploy $to"
+  if [ -z "$sum" ]; then
+    state=missing
+    if [ "$to" = prod ] && ! has_rules; then # a production deploy sends the style file with the first rules
+      state=norules
+      say "  $(name_of "$to") does not have it, and $STYLE_CSS has no rules yet: there is nothing to send."
+    else say "  $(name_of "$to") does not have it yet: ./topo.sh deploy $to"; fi
   elif [ "$sum" = "$mine" ]; then say "  $(name_of "$to") has it, as in $STYLE_CSS: $url/svg/${STYLE_SVG##*/}"
-  else say "  $(name_of "$to") has an older version: ./topo.sh deploy $to"; fi
+  else state=older; say "  $(name_of "$to") has an older version: ./topo.sh deploy $to"; fi
   old=$(grep -v -x -e "$STYLE_SVG" -e '' <<<"$(awk 'NF == 1' <<<"$there_now")" | sed 's|.*/||' | tr '\n' ' ' || true)
   [ -z "$old" ] || say "  It also has $old(the hashed names of kit 3.6 and older): the next ./topo.sh deploy $to removes them."
+  CACHE_CTL=''
   [ -z "$sum" ] || css_served "$to" "$url" "$c" "$mine"
   css_files "$to" "$c" "$home"
   say ""
+  if [ "$state" = norules ]; then
+    say "Put rules into $STYLE_CSS (step 6 of GUIDE-Maven-abc-styles.md), then ./topo.sh deploy $to."
+    return 0
+  fi
+  if [ "$state" != current ]; then # a page cannot show what that OpenNMS does not have: say that and nothing else
+    say "! $(name_of "$to") does not have your latest $STYLE_CSS$([ "$state" != older ] || echo ' (it has an older version)'), so its topology"
+    say "  page cannot show it. Run:  ./topo.sh deploy $to"
+    if [ "$to" = prod ]; then say "  (./topo.sh watch and ./topo.sh deploy dev change the development OpenNMS only.)"; fi
+    return 0
+  fi
   say "If the topology page does not show it:"
   say "  1. A tab keeps the list of svg files it got when it opened the page, and F5 keeps that list. Open the page in a NEW"
-  say "     tab (Ctrl+T), or log out of OpenNMS and in again. A private window does both and starts with no cache: the"
-  say "     quickest test."
-  say "  2. The browser keeps svg files for an hour (OpenNMS sends Cache-Control: max-age=3600) and Ctrl+Shift+R does not"
-  say "     load them again: reload with DevTools (F12) open and Network > Disable cache ticked."
+  say "     tab (Ctrl+T), or log out of OpenNMS and in again. A private window does both: the quickest test."
+  pt=2
+  case $(cache_kept "$CACHE_CTL") in
+    no) ;;
+    yes)
+      say "  $pt. OpenNMS lets the browser keep svg files ($CACHE_CTL) and Ctrl+Shift+R does not load them again: reload with"
+      say "     DevTools (F12) open and Network > Disable cache ticked."
+      pt=$((pt + 1)) ;;
+    *)
+      say "  $pt. The browser may keep svg files: reload with DevTools (F12) open and Network > Disable cache ticked."
+      pt=$((pt + 1)) ;;
+  esac
   if mark_on; then
-    say "  3. The page shows a yellow label at the bottom left: topology.css $(mark_id). No label: that page does not have the"
-    say "     file (point 1). Other characters: it has an older copy (point 2)."
+    say "  $pt. The page shows a yellow label at the bottom left: topology.css $(mark_id). No label: that page does not have the"
+    say "     file (point 1). Other characters: it has an older copy."
   else
-    say "  3. To see which version of the CSS a page has, put the line  /* mark */  into $STYLE_CSS and deploy: the page then"
+    say "  $pt. To see which version of the CSS a page has, put the line  /* mark */  into $STYLE_CSS and deploy: the page then"
     say "     shows a yellow label at the bottom left, topology.css and 6 characters. No label: it does not have the file."
+  fi
+  pt=$((pt + 1))
+  say "  $pt. ./topo.sh pagecheck prints lines to paste into the browser console (F12) on the topology page: they say which svg"
+  say "     files that page loaded, whether your CSS reached it, and the size a label really has there."
+  if [ "$(cache_kept "$CACHE_CTL")" = no ]; then
+    say "(OpenNMS answers Cache-Control: $CACHE_CTL for the style file: a reload loads it again, so the browser cache is not the reason.)"
   fi
   say "FILES.md, section 6, and step 6 of GUIDE-Maven-abc-styles.md say more."
 }
 
 # A header of an HTTP answer that curl wrote with -D: http_header <name> <file>
 http_header() { awk -v k="$1" '{ l = $0; sub(/\r$/, "", l); i = index(l, ":"); if (i > 1 && tolower(substr(l, 1, i - 1)) == tolower(k)) { v = substr(l, i + 1); sub(/^ +/, "", v); print v; exit } }' "$2"; }
+
+# Does a browser keep a file that comes with this Cache-Control header? no: no-store, no-cache or max-age=0 (a reload
+# loads it again); yes: max-age above 0 (it may serve its copy for that long); unknown: no header, or none that says.
+CACHE_CTL='' # what css_served read: the Cache-Control of the style file
+cache_kept() {
+  case $(tr '[:upper:]' '[:lower:]' <<<"$1") in
+    *no-store* | *no-cache* | *max-age=0*) echo no ;;
+    *max-age=[1-9]*) echo yes ;;
+    *) echo unknown ;;
+  esac
+}
 
 # What the web server answers for the style file, asked the way a browser asks: over the network from this machine; if
 # that fails, from inside the container.
@@ -647,9 +710,15 @@ css_served() { # css_served <dev|prod> <url> <container> <md5 of the text it sho
   say "  Asked $via for $u:"
   case $code in
     200)
+      CACHE_CTL=$cache
       if [ "$sum" = "$mine" ]; then say "    200, ${type:-no type}, ${size:-?} bytes: the text that $STYLE_CSS gives."
       else say "    200, ${type:-no type}, ${size:-?} bytes, but not the text that $STYLE_CSS gives: an older file (./topo.sh deploy $to)."; fi
       say "    Cache-Control: ${cache:-none}${last:+; Last-Modified: $last}"
+      case $(cache_kept "$cache") in
+        no) say "    A reload loads it again (the browser does not reuse a copy)." ;;
+        yes) say "    A browser may keep it for a while: reload with DevTools (F12) open and Network > Disable cache ticked." ;;
+        *) say "    No Cache-Control to go by: if a change does not show, reload with DevTools (F12) > Network > Disable cache ticked." ;;
+      esac
       case "$(tr '[:upper:]' '[:lower:]' <<<"$type")" in *xml*) ;; *) say "    ! The type is not XML: the page cannot read the file." ;; esac ;;
     30?)
       loc=$(http_header Location "$head")
@@ -735,6 +804,15 @@ case ${1:-} in
     ;;
   revert) revert "${2:-}" ;;
   view) view "${@:2}" ;;
+  pagecheck)
+    say "Open the topology page of the OpenNMS to check, in a tab of its own (http://<host>:8980/opennms/topology; log in and"
+    say "choose a view that shows nodes), press F12, choose Console, paste everything between the two lines below, press"
+    say "Enter, and read or copy what it prints. It only reads the page and asks the web server for svg/${STYLE_SVG##*/}."
+    say "If the console says \"allow pasting\", type that, press Enter and paste again."
+    say "--------------------------------------------------------------------------------"
+    cat tools/pagecheck.js
+    say "--------------------------------------------------------------------------------"
+    ;;
   icons)
     case ${2:-dev} in
       dev) python3 tools/icons.py "http://localhost:$DEV_PORT/opennms" "$DEV_USER" "$DEV_PASSWORD" ;;
@@ -743,7 +821,7 @@ case ${1:-} in
     esac
     ;;
   *)
-    sed -n '2,20p' "$0"
+    sed -n '2,21p' "$0"
     exit 2
     ;;
 esac
