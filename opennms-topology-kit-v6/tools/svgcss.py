@@ -84,6 +84,20 @@ def subject(selector):
     return (tag.group(0).lower() if tag else ''), set(re.findall(r'\.(-?[_a-zA-Z][\w-]*)', last)), '#' in last
 
 
+def only_variables(body):
+    """'--a: 1; --b: 2;' -> True"""
+    props = [part.split(':', 1)[0].strip() for part in body.split(';') if ':' in part]
+    return bool(props) and all(p.startswith('--') for p in props)
+
+
+def brief(head, body, width=118):
+    """One line of a rule; a long one ends in '...'."""
+    text = '%s { %s }' % (head, body)
+    if len(text) <= width:
+        return text
+    return '%s ... }' % (text[:width].rsplit(';', 1)[0] + ';' if ';' in text[:width] else text[:width])
+
+
 class SvgFile:
     def __init__(self, path):
         self.path, self.name = path, path.name
@@ -117,8 +131,29 @@ class SvgFile:
         return found
 
     def global_rules(self):
-        """Rules whose subject has no class and no id: they style every such element of the page."""
-        return [(h, d) for h, d in self.rules if any(not subject(s)[1] and not subject(s)[2] for s in split_list(h))]
+        """Rules whose subject has no class and no id: they style every such element of the page. Rules that only set
+        custom properties (":root { --a: 1 }") are left out: they style nothing themselves."""
+        return [(h, d) for h, d in self.rules
+                if any(not subject(s)[1] and not subject(s)[2] for s in split_list(h)) and not only_variables(d)]
+
+    def page_rules(self):
+        """Rules that can match nothing inside the drawings of this file, so they style the page: nodes, links, labels."""
+        used = set()
+        if self.root is not None:
+            for el in self.root.iter():
+                used.update((el.get('class') or '').split())
+        out = []
+        for head, body in self.rules:
+            inside = False
+            for sel in split_list(head):
+                bare = re.sub(r'\[[^\]]*\]', '', sel)
+                classes = set(re.findall(r'\.(-?[_a-zA-Z][\w-]*)', bare))
+                ids = set(re.findall(r'#([\w-]+)', bare))
+                if (classes or ids) and classes <= used and ids <= set(self.by_id):
+                    inside = True
+            if not inside:
+                out.append((head, body))
+        return out
 
 
 def load(folder):
@@ -159,6 +194,19 @@ def overview(folder):
         for head, body in f.global_rules():
             print('  ! %s: "%s { %s }" styles every element of that kind on the page (links and labels too)'
                   % (f.name, head, body))
+    page = [(f, f.page_rules()) for f in files if f.name not in STOCK]
+    page = [(f, r) for f, r in page if r]
+    if page:
+        print('\nRules that style the page itself (nodes, links, labels) instead of one icon. They apply together with the')
+        print('rules of styles/topology.css; where both set the same property, the more specific rule wins, an !important one')
+        print('wins over one without, and with equal weight the file loaded last wins (the order changes from page to page):')
+        for f, r in page:
+            print('  %s' % f.name)
+            for head, body in r[:10]:
+                print('    %s' % brief(head, body))
+            if len(r) > 10:
+                print('    ... %d more' % (len(r) - 10))
+        print('  ./topo.sh css <file> prints them in full.')
     print('\n./topo.sh css <file.svg | icon id> prints CSS for the parts of one icon (GUIDE-Maven-abc-styles.md, step 7).')
 
 
@@ -267,6 +315,13 @@ def rules(folder, what, dev_url, prod_url):
               % (f.name, images))
     for head, body in f.global_rules():
         print('/* ! The file\'s rule "%s { %s }" styles every element of that kind on the page. */' % (head, body))
+    page = f.page_rules()
+    if page:
+        print('\n/* The file\'s rules for the page itself (nodes, links, labels), not for one icon. They apply with yours; the')
+        print('   more specific rule wins, !important wins over a rule without, and the file loaded last wins a tie:')
+        for head, body in page:
+            print('   %s' % ('%s { %s }' % (head, body)).replace('*/', '* /'))
+        print('*/')
 
 
 WHITE = {'#fff', '#ffffff', 'white', 'none', 'transparent'}
