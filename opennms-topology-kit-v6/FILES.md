@@ -66,7 +66,10 @@ with a new name is ignored. Add your lines to an existing file.
 For each node OpenNMS takes the first match (`IconRepositoryManager.getSVGIconId`):
 
 1. **`<namespace>.<vertex id>`**: a mapping for this one node, in any of these files. Right-click > Change Icon writes
-   these. It works for GraphML views too: `./topo.sh view show <name>` prints the namespace and the node ids.
+   these. It works for GraphML views too: `./topo.sh view show <name>` prints the namespace and the node ids, and
+   `./topo.sh view icon <name> <node id> <icon id>` writes the line with the right namespace. The namespace is the
+   one of the view (for `Maven-abc`: `Maven-abc.12 = cirrus`), not one copied from an example; a line whose
+   namespace no node has does nothing, and `./topo.sh view show` says so.
 2. **The node's icon key.** If that key has no mapping, the key without its last `.part` is tried, and so on.
    - **Enhanced Linkd** gives a node `linkd.system.snmp.<sysObjectID>` (`linkd.system` without SNMP), in namespace `nodes` (`nodes:<layer>` for a layer). The vertex id is the node id.
    - **GraphML:** the node's `iconKey` is the icon id itself.
@@ -164,7 +167,8 @@ A node without `foreignSource` and `foreignID` (or `nodeID`) is a drawing only: 
 
 ```bash
 ./topo.sh view list [dev|prod]             # the views there, with their View-menu labels
-./topo.sh view show <name> [dev|prod]      # its nodes: id, label, icon key, the icon drawn
+./topo.sh view show <name> [dev|prod]      # its nodes: id, label, icon key, the icon drawn (and what is wrong with it)
+./topo.sh view icon <name> <node id> <icon id>  # another icon for one node: writes the mapping line, deploys to dev
 ./topo.sh view add my-view.graphml [name]  # checks the file, writes it and its two cfg files into opennms/, deploys to dev
 ./topo.sh deploy dev                       # after a change of opennms/etc/graphml/<name>.xml: the view is loaded anew
 ./topo.sh deploy prod                      # to production, with confirmation, backups/ and ./topo.sh undo
@@ -178,9 +182,9 @@ with the other topology files (but not the demo view).
 
 **A view that production's software writes** (one per requisition, for example) may be written again at any time. Change
 its look around the file where you can: a line `<namespace>.<node id> = <icon id>` in
-`etc/org.opennms.features.topology.app.icons.default.cfg` gives one node another icon and wins over its `iconKey`, the
-svg files and `styles/topology.css` do the rest. A production deploy leaves alone a view file that production changed
-after your pull. `GUIDE-Maven-abc-styles.md` walks through it.
+`etc/org.opennms.features.topology.app.icons.default.cfg` (`./topo.sh view icon` writes it) gives one node another
+icon and wins over its `iconKey`, the svg files and `styles/topology.css` do the rest. A production deploy leaves
+alone a view file that production changed after your last pull or deploy. `GUIDE-Maven-abc-styles.md` walks through it.
 
 - **Example 11** adds the view "My DAS (GraphML)": a room drawn above four demo nodes.
 

@@ -12,6 +12,7 @@ cd ~/opennms-fundamentals/opennms-fundamentals/opennms-topology-kit-v6
 |---|---|
 | View menu label | MavenDAS: Home-Lab-_RPI3_OEBB_2222 Requisition: abc |
 | View name (`./topo.sh view list`) | `Maven-abc` |
+| Namespace (the first part of the name of each node in OpenNMS) | `Maven-abc`: `./topo.sh view show` prints it |
 | Files in OpenNMS | `/opt/opennms/etc/graphml/Maven-abc.xml` (a GraphML file), plus two `.cfg` files that put it into the View menu |
 
 ## 0. What you can change, and where
@@ -23,7 +24,7 @@ can:
 
 | You want | You change | It affects | Step |
 |---|---|---|---|
-| another icon for one node | a line `<namespace>.<node id> = <icon id>` in `opennms/etc/org.opennms.features.topology.app.icons.default.cfg` | that node in this view | 5 |
+| another icon for one node | `./topo.sh view icon Maven-abc <node id> <icon id>`: it writes a line in `opennms/etc/org.opennms.features.topology.app.icons.default.cfg` | that node in this view | 5 |
 | icon size, labels, links, alarm frames | `styles/topology.css` | the whole topology page: every view | 6 |
 | another look for one icon: a tint, grey, its labels | a rule in `styles/topology.css` that names the icon | every node drawn with that icon, in every view | 7 |
 | exact colours of an icon | its file in `opennms/jetty-webapps/opennms/svg/` | every node drawn with that icon, in every view | 7 |
@@ -48,17 +49,18 @@ Skip what you have done already.
    ssh maven-admin@192.168.0.36 podman ps     # lists the production containers: it works
    ```
 
-4. **The kit, version 3.5 or later.** Copy the update archive from the computer with the browser to the development
-   machine, for example with `scp opennms-topology-kit-v3.5-update.tar.gz admin@192.168.0.47:` on that computer. Then,
-   on the development machine, unpack it over the kit folder:
+4. **The kit, version 3.6 or later** (it goes over version 3.5, 3.4, ... of the kit). Copy the update archive from the
+   computer with the browser to the development machine, for example with
+   `scp opennms-topology-kit-v3.6-update.tar.gz admin@192.168.0.47:` on that computer. Then, on the development
+   machine, unpack it over the kit folder:
 
    ```bash
-   tar xzf ~/opennms-topology-kit-v3.5-update.tar.gz -C ~/opennms-fundamentals/opennms-fundamentals/opennms-topology-kit-v6
+   tar xzf ~/opennms-topology-kit-v3.6-update.tar.gz -C ~/opennms-fundamentals/opennms-fundamentals/opennms-topology-kit-v6
    chmod +x dev.sh topo.sh   # only if "Permission denied"
    ```
 
    It replaces a few kit files and adds this guide. Your `opennms/`, `styles/`, `backups/` and `kit.env` stay as
-   they are.
+   they are. Check: `./topo.sh view icon` answers with a line that starts `usage: ./topo.sh view icon`.
 
 ## 2. Start the development OpenNMS
 
@@ -99,10 +101,10 @@ have, deploy them (step 10), drop them with `./topo.sh revert`, or start over wi
 In the browser, reload the topology page, open the **View** menu and choose
 **MavenDAS: Home-Lab-_RPI3_OEBB_2222 Requisition: abc**.
 
-Dev shows the nodes with their icons, labels and links, as production does, but no alarm colours or alarm counts: the
-nodes of requisition abc and their alarms are in production's database only. View > DAS demo (GraphML) shows alarm
-colours on dev. If the view opens with one node only, press **Increase Semantic Zoom Level** in the toolbar: the view
-may focus on one node, and each zoom level shows the nodes one link further away.
+Dev shows the nodes with their icons, labels and links, as production does. Every frame is green (status normal):
+the nodes of requisition abc and their alarms are in production's database only, and production colours a frame by
+the alarms of its node. View > DAS demo (GraphML) shows alarm colours on dev. If the view opens with one node only,
+press **Increase Semantic Zoom Level** in the toolbar: each zoom level shows the nodes one link further away.
 
 Now look at the view's data:
 
@@ -113,20 +115,32 @@ Now look at the view's data:
 ```text
 View Maven-abc in opennms/etc/graphml/Maven-abc.xml, with the icon mappings of opennms/etc:
 View menu label: MavenDAS: Home-Lab-_RPI3_OEBB_2222 Requisition: abc
-Layer "abc": namespace maven:abc; 5 nodes, 4 links; layout Hierarchy Layout, focus FIRST, zoom level 1, status none
+Layer "Maven-abc": namespace Maven-abc; 9 nodes, 2 links; layout D3 Layout, focus ALL, zoom level 1, status default
   node id          label                        iconKey              icon drawn
-  12               MU-1 Master                  orion                orion (its iconKey)
-  13               EU-1 Expansion               das_helix            das_helix (its iconKey)
-  14               RU-1 Remote                  das_nimbus           das_nimbus (its iconKey)
-  15               RU-2 Remote                  das_nimbus           das_nimbus (its iconKey)
-  16               RU-3 Remote                  -                    generic (default)
-  Another icon for one node: the line "maven\:abc.<node id> = <icon id>" in opennms/etc/org.opennms.features.topology.app.icons.default.cfg
+  273458025999882  Home-Lab-_RPI3_OEBB_2222     maven_site           maven_site (its iconKey)
+  6                home lab 1                   orion                orion (its iconKey)
+  8                home lab 1                   cirrus               cirrus (its iconKey)
+  9                home lab 1                   remote               remote (its iconKey)
+  12               home lab 1                   remote               remote (its iconKey)
+  10               home lab 1                   helix                helix (its iconKey) ! no svg file defines "helix": no icon; similar ids: das_helix
+  11               home lab 1                   nimbus               nimbus (its iconKey) ! no svg file defines "nimbus": no icon; similar ids: das_nimbus
+  13               home lab 1                   helix                helix (its iconKey) ! no svg file defines "helix": no icon; similar ids: das_helix
+  14               home lab 1                   nimbus               nimbus (its iconKey) ! no svg file defines "nimbus": no icon; similar ids: das_nimbus
+  Another icon for one node: ./topo.sh view icon Maven-abc <node id> <icon id>
+  (it writes the line "Maven-abc.<node id> = <icon id>" in opennms/etc/org.opennms.features.topology.app.icons.default.cfg)
 ```
 
-(The values above are an example; yours come from production.) Note the **namespace** and the **node ids**: step 5
-needs them. "icon drawn" is the icon OpenNMS shows for the node, and why: a line for the node in an icon mapping file,
-else its iconKey, else the default icon. A "!" marks an icon id that no svg file defines: that node has no icon.
-`status` tells whether the view shows alarm colours at all: `none` means not in production either.
+How to read it:
+
+- The **namespace** (`Maven-abc`) and the **node id** name a node for OpenNMS: `Maven-abc.12` is node 12 of this view.
+  Step 5 uses both; `./topo.sh view icon` takes the namespace from the file, so you only give the node id.
+- "icon drawn" is the icon OpenNMS shows for the node, and why: a line for the node in an icon mapping file, else its
+  iconKey, else the default icon.
+- A "!" marks an icon id that no svg file defines. OpenNMS then draws nothing for that node: it has no icon, only a
+  frame and a label. Here that is nodes 10, 13 (iconKey `helix`) and 11, 14 (`nimbus`). Production probably shows them
+  without an icon too: look at its topology page. Step 5 gives them one. The "similar ids" are icons that exist
+  (`./topo.sh icons` lists them all).
+- `status default`: production colours each frame by the alarms of the node. `none` would mean no alarm colours at all.
 
 From now on keep a **second terminal** open on the development machine, in the kit folder, with:
 
@@ -139,24 +153,54 @@ seconds). Then reload the topology page in the browser. Without `watch`, run `./
 
 ## 5. Give a node another icon (this view only)
 
-1. Choose the icon. `./topo.sh icons` first lists the icon ids of each svg file (of a big file the first few). The
-   iconKey column of `./topo.sh view show Maven-abc` shows the icons this view uses now.
-2. Open `opennms/etc/org.opennms.features.topology.app.icons.default.cfg` in an editor and add one line per node, with
-   the namespace and node id from step 4:
+1. Choose the icon id. `./topo.sh icons` lists the icon ids of each svg file (of a big file the first few). The iconKey
+   column of `./topo.sh view show Maven-abc` shows the icons this view uses now.
+2. Give the node its icon, for example node 12 the icon of node 8 (`cirrus`):
 
-   ```properties
-   # Maven-abc: RU-1 gets the Helix icon
-   maven\:abc.14 = das_helix
+   ```bash
+   ./topo.sh view icon Maven-abc 12 cirrus
    ```
 
-   A colon in the namespace needs a backslash (`maven\:abc`): `view show` prints the key that way. Without it,
-   OpenNMS reads `maven` as the key and the line does nothing.
-3. Save. `watch` deploys it; Karaf reads the file within a second. Reload the topology page.
-4. Check: in `./topo.sh view show Maven-abc`, node 14 now has
-   `das_helix (the line maven\:abc.14 in org.opennms.features.topology.app.icons.default.cfg)`.
+   ```text
+   View Maven-abc:
+     Node 12 (home lab 1) of the view Maven-abc: the icon remote -> cirrus
+     opennms/etc/org.opennms.features.topology.app.icons.default.cfg: Maven-abc.12 = cirrus
+   ```
+
+   The command writes the line `Maven-abc.12 = cirrus` into `opennms/etc/org.opennms.features.topology.app.icons.default.cfg`
+   and deploys it to dev. It refuses an icon id that no svg file defines (such as `helix`: the node would lose its
+   icon) and a node id that the view does not have, and changes nothing then.
+3. Reload the topology page: node 12 has the new icon.
+4. Check: in `./topo.sh view show Maven-abc`, the row of node 12 says
+   `cirrus (the line Maven-abc.12 in org.opennms.features.topology.app.icons.default.cfg)`.
+   If `view show` also prints `! the line "maven\:abc.12" ... does nothing`, that line came from the first version of
+   this guide, which used the namespace of an example. Delete it in an editor, or with:
+
+   ```bash
+   sed -i '/^maven\\:abc\./d' opennms/etc/org.opennms.features.topology.app.icons.default.cfg
+   ```
+
+   `watch` deploys the file again (without `watch`: `./topo.sh deploy dev`).
+5. The four nodes without an icon (check with `./topo.sh icons` that `das_helix` and `das_nimbus` are listed):
+
+   ```bash
+   ./topo.sh view icon Maven-abc 10 das_helix
+   ./topo.sh view icon Maven-abc 13 das_helix
+   ./topo.sh view icon Maven-abc 11 das_nimbus
+   ./topo.sh view icon Maven-abc 14 das_nimbus
+   ```
+
+6. Back to the icon of the view file: `./topo.sh view icon Maven-abc 12 --reset` takes the line out again.
+
+**By hand.** The command only edits a line. You can write it yourself: open
+`opennms/etc/org.opennms.features.topology.app.icons.default.cfg`, add `<namespace>.<node id> = <icon id>`, save
+(`watch` deploys it). The namespace is the one on the `Layer` line of `./topo.sh view show Maven-abc`: `Maven-abc`.
+**The namespace of an example is not yours**: a line whose namespace is not the view's changes nothing, silently.
+`./topo.sh view show` names such a line ("does nothing: the namespace of this view is Maven-abc"). A colon in a
+namespace needs a backslash (`maven\:abc.14`); `view show` and `view icon` spell the key that way.
 
 OpenNMS looks for `<namespace>.<node id>` in every icon mapping file before it uses the node's `iconKey`
-(`IconRepositoryManager.getSVGIconId`). So this line wins over the GraphML file, and it stays valid when production
+(`IconRepositoryManager.getSVGIconId`). So the line wins over the GraphML file, and it stays valid when production
 writes Maven-abc.xml again, as long as the node ids stay the same. Right-click > Change Icon does not help here: for a
 GraphML node it only works when a mapping file already holds the node's iconKey as a key, and usually none does.
 
@@ -242,7 +286,7 @@ The file names each property in a `<key>` line, and the values sit in `<data key
 `id`, which may be `d0`, `d1`, ... For example, with `<key id="d5" for="graph" attr.name="preferred-layout" .../>`:
 
 ```xml
-<data key="d5">Hierarchy Layout</data>         <!-- or: D3 Layout, Circle Layout, Grid Layout, ... -->
+<data key="d5">Hierarchy Layout</data>         <!-- your view has D3 Layout; others: Circle Layout, Grid Layout, ... -->
 ```
 
 Save the file; `watch` deploys it and OpenNMS loads the view anew: it leaves the View menu for about 5 seconds. Reload
@@ -252,8 +296,9 @@ the properties of a GraphML view.
 ## 9. Check and undo on dev
 
 ```bash
-./topo.sh diff                    # everything you changed since the pull
+./topo.sh diff                    # what production does not have yet: your changes since the last pull or deploy
 ./topo.sh view show Maven-abc     # the icon each node of the view gets now
+./topo.sh view icon Maven-abc 12 --reset   # one node back to the icon of the view file
 ./topo.sh revert <file>           # one file back to production's version, and onto dev
 ./topo.sh revert                  # all of them
 ```
@@ -270,15 +315,17 @@ the properties of a GraphML view.
 
    It lists the files it will copy and what it will do in production's overlay folders (so a restart of production
    keeps your files), then asks `Go ahead? [y/N]`. Answer `y`. Nothing restarts. It also keeps production's old files
-   in `backups/<date>-<time>/`. Two messages you may see:
-   - *"Production changed (or removed) these files after your pull"*: for example production's software wrote
+   in `backups/<date>-<time>/`. It sends only what production does not have yet, so you can change more and deploy
+   again; `./topo.sh diff` is empty afterwards. Two messages you may see:
+   - *"Production changed (or removed) these files after your last pull or deploy"*: for example production's software wrote
      Maven-abc.xml again. These files stay as production has them; your other changes go.
-   - *"You and production both changed these files after your pull, so they are held back"*: compare them
+   - *"You and production both changed these files after your last pull or deploy, so they are held back"*: compare them
      (`./topo.sh view show Maven-abc prod` for the view); `FORCE=1 ./topo.sh deploy prod` sends yours anyway.
 4. Open **http://192.168.0.36:8980/opennms/topology**, choose the view in the View menu and press **Ctrl+Shift+R** once.
 5. If something is wrong: `./topo.sh undo` puts back what the last deploy replaced and removes what it added. Run it
    again to go one deploy further back.
-6. Next round: `./topo.sh pull` makes production's current files (yours included) your new starting point.
+6. To start from production's files again, for example after its software wrote Maven-abc.xml: `./topo.sh pull`
+   makes production's current files (yours included) your new starting point.
 
 ## 11. When something is not as expected
 
@@ -286,12 +333,13 @@ the properties of a GraphML view.
 |---|---|---|
 | a node without an icon | its icon id is in no svg file | `./topo.sh view show Maven-abc` marks it with "!"; choose an icon id from `./topo.sh icons` |
 | a node with the generic icon | it has no iconKey and no mapping line | a mapping line (step 5) |
-| a mapping line does nothing | a colon in the namespace without a backslash, or another node id | copy the key from `./topo.sh view show Maven-abc` |
+| a mapping line does nothing | its namespace is not the view's (for example the one of an example), a colon without a backslash, or another node id | `./topo.sh view show Maven-abc` names such a line ("does nothing: the namespace of this view is ..."); delete it and use `./topo.sh view icon` |
+| the icon of a node does not change after a mapping line | the line is not the one for this node, or the page was not reloaded | `./topo.sh view show Maven-abc`: the row of the node must say `(the line Maven-abc.<id> in ...)`; then reload the page |
 | an svg change does not show | the browser's cache | Ctrl+Shift+R |
 | a CSS rule does nothing | a stock rule with more classes wins | name the classes of the stock rule, after `svg` (step 6); the browser's developer tools (F12) show which rule wins |
 | the view is not in the View menu | its cfg file is missing, or it is being loaded anew (5 seconds) | `./topo.sh view list`; reload the page; `./dev.sh logs` names errors in the file |
-| no alarm colours in dev | the view's nodes and alarms are in production's database only | look at alarm colours in View > DAS demo (GraphML); with `status none` in `view show`, production has none either |
-| a production deploy skipped Maven-abc.xml | production wrote the file after your pull | `./topo.sh pull`, then change it again if you still need to |
+| every frame is green in dev | the view's nodes and their alarms are in production's database only | look at alarm colours in View > DAS demo (GraphML) or on production |
+| a production deploy skipped Maven-abc.xml | production wrote the file after your last pull or deploy | `./topo.sh pull`, then change it again if you still need to |
 | `./dev.sh up` or the login fails | see README, "When something goes wrong" | `./dev.sh status` |
 
 ## 12. The commands of this guide
@@ -301,7 +349,8 @@ the properties of a GraphML view.
 | `./dev.sh up`, `./dev.sh status` | start the development OpenNMS; its state, nodes, health and a test login |
 | `./topo.sh pull` | production's topology files into `opennms/`, and onto dev |
 | `./topo.sh view list [prod]`, `./topo.sh view show Maven-abc [prod]` | the GraphML views; the nodes of one view and their icons |
+| `./topo.sh view icon Maven-abc <node id> <icon id>` | another icon for one node (`--reset` instead of the icon id: back to the view file's) |
 | `./topo.sh icons` | every icon id, by svg file, and the icon each node gets |
 | `./topo.sh watch` | deploy every save to dev |
-| `./topo.sh diff`, `./topo.sh revert [file]` | your changes since the pull; drop them |
+| `./topo.sh diff`, `./topo.sh revert [file]` | what production does not have yet (since the last pull or deploy); drop it |
 | `./topo.sh deploy prod`, `./topo.sh undo` | hot deploy to production; take the last deploy back |

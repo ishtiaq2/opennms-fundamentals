@@ -63,11 +63,13 @@ show has no such field, `./dev.sh up` gives dev's copy one and says so; producti
 ```bash
 ./topo.sh example        # the eleven examples, one per file and effect (FILES.md has the details)
 ./topo.sh example 7      # apply one: it changes files in opennms/ or styles/ and deploys them to dev
-./topo.sh diff           # everything you changed since the pull
+./topo.sh diff           # everything you changed since the last pull or production deploy
 ./topo.sh revert         # drop your changes (or one file: ./topo.sh revert <file>)
 ./topo.sh watch          # deploy every save to dev, while you edit files in opennms/ and styles/
 ./topo.sh icons          # every icon id, and the icon each node gets (./topo.sh icons prod: production's nodes)
 ./topo.sh view           # the GraphML views: entries of the View menu (add, remove: FILES.md, section 5)
+./topo.sh view show <name>                     # a view's namespace, node ids and the icon each node gets
+./topo.sh view icon <name> <node id> <icon id> # another icon for one node of a view; --reset takes it back
 ```
 
 Reload the topology page after a deploy. After a replaced icon file, press Ctrl+Shift+R, so the browser drops its old copy.
@@ -83,10 +85,11 @@ A deploy compares each file with the container's copy and copies the changed one
 Production's icons, mappings and styles are then the ones from your development machine. Nothing restarts;
 reload the topology page.
 
-A production deploy sends only what you changed since your pull (`.kit/baseline`). A file that production changed
-after the pull, and you did not (its software writes GraphML views again, someone used Change Icon), stays as
-production has it; a file both of you changed is held back until you send it with `FORCE=1 ./topo.sh deploy prod`.
-After a deploy, `./topo.sh pull` makes production's current files your new starting point.
+A production deploy sends only what production does not have yet (`.kit/baseline` holds production's files as of your
+last pull or deploy, so you can change more and deploy again). A file that production changed after that, and you
+did not (its software writes GraphML views again, someone used Change Icon), stays as production has it; a file both
+of you changed is held back until you send it with `FORCE=1 ./topo.sh deploy prod`. `./topo.sh pull` makes
+production's current files your new starting point.
 
 **Overlay folders.** The image copies three folders into OpenNMS at every start: `/opt/opennms-overlay` (below
 OpenNMS's home), `/opt/opennms-etc-overlay` (below `etc/`) and `/opt/opennms-jetty-webapps-overlay` (below
@@ -112,7 +115,7 @@ renames it `<date>-<time>.undone`; run it again to go one deploy further back. `
 | `opennms/` | the topology files you change: `etc/org.opennms.features.topology.app*.cfg`, `...icons.list`, GraphML views (`etc/graphml/*.xml` and their cfg files), `jetty-webapps/opennms/svg/*.svg` | production, `./topo.sh pull` |
 | `styles/topology.css` | your CSS for the topology page | the kit |
 | `reference/topo_default-styles.css` | the stock stylesheet, for reading | production's theme jar, `./topo.sh pull` |
-| `.kit/baseline/` | `opennms/` as pulled, for `./topo.sh diff` and `revert` | `./topo.sh pull` |
+| `.kit/baseline/` | production's version of the files in `opennms/` as of your last pull or deploy, for `./topo.sh diff`, `revert` and the deploy check | `./topo.sh pull`, `./topo.sh deploy prod` |
 | `.kit/overlays/opennms-overlay/` | production's `/opt/opennms-overlay` without `etc/`, and the dev-only login page if one was needed | production, `./dev.sh up` |
 | `.kit/overlays/opennms-jetty-webapps-overlay/` | production's `/opt/opennms-jetty-webapps-overlay` | production, `./dev.sh up` |
 | `backups/` | what each production deploy replaced (section 3) | `./topo.sh deploy prod` |
@@ -121,7 +124,7 @@ renames it `<date>-<time>.undone`; run it again to go one deploy further back. `
 ```bash
 find .kit/overlays -type f     # every file dev got from production's overlay folders
 find opennms -type f | sort    # the topology files
-./topo.sh diff                 # what you changed in them since the pull
+./topo.sh diff                 # what you changed in them since the last pull or production deploy
 ```
 
 **Not copied from production:** its configuration (`/opt/opennms/etc` and the etc overlay), its database with its
@@ -158,6 +161,7 @@ ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml  # 
 | `./topo.sh deploy dev\|prod [-y]`, `./topo.sh undo [-y]` | hot deploy; undo the last production deploy |
 | `./topo.sh watch`, `example [N]`, `diff`, `revert [file]`, `icons [dev\|prod]` | see section 2 |
 | `./topo.sh view [list [dev\|prod]]`, `view show <name> [dev\|prod]`, `view add <file> [name]`, `view remove <name> [dev\|prod]` | GraphML views (FILES.md, section 5) |
+| `./topo.sh view icon <name> <node id> <icon id \| --reset>` | another icon for one node of a view: the line `<namespace>.<node id> = <icon id>`, written for you, and deployed to dev |
 
 ## When something goes wrong
 
