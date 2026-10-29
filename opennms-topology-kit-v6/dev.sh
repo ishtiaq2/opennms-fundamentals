@@ -148,7 +148,8 @@ get_image() {
     else
       say "Copying $ONMS_IMAGE from $PROD_SSH (about 1.5 GB; production keeps running)."
       say "  It is not in this machine's podman storage, which holds $(p images -q | wc -l) images. The kit never deletes it."
-      pp save "$ONMS_IMAGE" | p load -q
+      pp save "$ONMS_IMAGE" | p load -q >/dev/null
+      say "  Copied."
     fi
   fi
   p image exists "$ONMS_IMAGE" || die "$ONMS_IMAGE is still missing. Check the name with: ./dev.sh prod-info"
@@ -164,7 +165,7 @@ prepare_overlays() {
   local mounted=() listing='' print folder name excl image_id
   image_id=$(p image inspect -f '{{.Id}}' "$ONMS_IMAGE" | cut -c 1-12)
   if [ "$DEV_PROD_OVERLAYS" = yes ]; then
-    if ssh "${SSH_OPTS[@]}" "$PROD_SSH" true 2>/dev/null; then
+    if ssh "${SSH_OPTS[@]}" "$PROD_SSH" true </dev/null 2>/dev/null; then
       mapfile -t mounted < <(pp container inspect -f '{{range .Mounts}}{{if ne (len .Name) 64}}{{.Destination}}{{"\n"}}{{end}}{{end}}' \
         "$PROD_CONTAINER" </dev/null | grep -x -e /opt/opennms-overlay -e /opt/opennms-jetty-webapps-overlay || true)
       if [ ${#mounted[@]} -gt 0 ]; then # size, time and name of each file
@@ -224,7 +225,7 @@ create_stack() {
   local env_args=() cap_args=() extra_args=() kv cap core_id
   get_image
   prepare_overlays
-  p image exists "$PG_IMAGE" || { say "Downloading $PG_IMAGE"; p pull "$PG_IMAGE"; }
+  p image exists "$PG_IMAGE" || { say "Downloading $PG_IMAGE"; p pull -q "$PG_IMAGE" >/dev/null; }
   p pod exists "$DEV_POD" ||
     p pod create --name "$DEV_POD" --label "$POD_LABEL=$POD_ID" -p "$DEV_PORT:8980" -p "$DEV_KARAF_PORT:8101" >/dev/null
   p container exists "$DB" || p create --pod "$DEV_POD" --name "$DB" \
@@ -396,10 +397,12 @@ wait_opennms() { # wait_opennms [running]: OpenNMS ran already before this ./dev
   done
 }
 
-seed_once() {
-  [ ! -f .kit/seeded ] || return 0
+seed_once() { # again when seed/ or tools/seed.py changed (a new kit version)
+  local print
+  print=$(cat seed/* tools/seed.py | md5sum | cut -c 1-12)
+  [ "$(cat .kit/seeded 2>/dev/null)" != "$print" ] || return 0
   if python3 -u tools/seed.py --url "$URL" --user "$DEV_USER" --password "$DEV_PASSWORD" --container "$DEV_CONTAINER" --podman "$PODMAN"; then
-    mkdir -p .kit && touch .kit/seeded
+    mkdir -p .kit && echo "$print" >.kit/seeded
   else
     warn "The demo nodes are not complete (see above); ./dev.sh up tries again."
   fi
@@ -458,6 +461,7 @@ status() {
   printf '  %-14s %s\n' OpenNMS "$words" Memory "$(mem_mb MemAvailable) MB free of $(mem_mb MemTotal) MB" \
     Topology "http://$(host_address):$DEV_PORT/opennms/topology   (user $DEV_USER, password $DEV_PASSWORD)"
   [ "$state" != down ] || return 0
+  python3 tools/webcheck.py nodes "$URL" "$DEV_USER" "$DEV_PASSWORD" "http://$(host_address):$DEV_PORT/opennms" || true
   say "  Health checks:"
   python3 tools/webcheck.py health "$URL" "$DEV_USER" "$DEV_PASSWORD" | sed 's/^/  /' || true
   login_check | sed 's/^/  /'

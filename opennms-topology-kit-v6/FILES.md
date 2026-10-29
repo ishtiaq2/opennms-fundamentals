@@ -10,11 +10,11 @@ example (`./topo.sh example N`) that changes that file, so you can watch what ha
 | 2 | `etc/org.opennms.features.topology.app.icons.*.cfg` | which node gets which icon | within a second | 01, 02, 03 |
 | 3 | `etc/org.opennms.features.topology.app.icons.list` | the icons in right-click > Change Icon | when the dialog opens | 04 |
 | 4 | `etc/org.opennms.features.topology.app.cfg` | header, automatic refresh | after the topology app restarts itself (~10 s) | 10 |
-| 5 | `etc/graphml/<name>.xml` | nodes, links and icons of a GraphML view | after an upload through REST | |
+| 5 | `etc/graphml/<name>.xml` and its two `.cfg` files | an entry of the View menu: its nodes, links and icons | when its cfg file appears (a deploy takes it away for 5 s and back) | 11 |
 | 6 | stock stylesheet in the theme jar, overridden by `styles/topology.css` | colours and widths of links, alarm frames, labels | override: on page reload | 07, 08, 09 |
 | 7 | Java/GWT source, compiled into bundles under `system/` | how nodes and links are drawn, the 48 px icon size | after a Maven build and restart | (08 does it with CSS) |
 
-Files 1-4 and the override of 6 are hot: `./topo.sh deploy` copies them into the running container and
+Files 1-5 and the override of 6 are hot: `./topo.sh deploy` copies them into the running container and
 OpenNMS picks them up without a restart.
 
 ## 1. Icon files: `jetty-webapps/opennms/svg/*.svg`
@@ -101,17 +101,90 @@ after about 10 seconds. `...app.menu.cfg` orders the menus.
 
 - **Example 10** turns on a 30-second refresh.
 
-## 5. GraphML views: `etc/graphml/<name>.xml`
+## 5. The View menu, and GraphML views of your own
 
-A GraphML view, such as "DAS demo" from `seed/das-demo.graphml`, lists its nodes and links. Each node names its icon in
-`<data key="iconKey">orion</data>`; `foreignSource` and `foreignID` tie it to a node and its alarms. OpenNMS writes
-these files, plus `etc/org.opennms.features.topology.plugins.topo.graphml-<name>.cfg`, when a graph is uploaded.
-To change one, upload it again:
+The View menu of the topology page has one entry per topology provider. The stock ones draw OpenNMS nodes:
+
+| Entry | Draws | Lines | Icons |
+|---|---|---|---|
+| Enhanced Linkd | every node | links that Enhanced Linkd finds, and user-defined links | `...icons.linkd.cfg` (section 2) |
+| Path Outage | every node, under its parent node | node to parent: `parent-foreign-id` in the requisition | `...icons.pathoutage.cfg`: `pathoutage.<node id> = <icon>`, else `generic` |
+| Application, Business Services, VMware | applications, business services, VMware objects | their relations | their own `.cfg` file |
+| one entry per GraphML view | what its file lists | its `<edge>` elements | each node's `iconKey`: the icon id itself |
+
+A view opens on its *focus* at a *semantic zoom level* (SZL): the focus nodes and every node up to SZL links away.
+Path Outage focuses on the node with the worst outage, else the first node, at SZL 0: you see one node. The toolbar
+buttons "Increase Semantic Zoom Level" and "Decrease Semantic Zoom Level" change the SZL, and the search box adds nodes to
+the focus. A link can set both: `/opennms/topology?provider=Path%20Outage&szl=2&focus-vertices=<node id>`
+(`./dev.sh status` prints it for the demo).
+
+**A GraphML view is three files in `etc/`:**
+
+| File | What it says |
+|---|---|
+| `graphml/<name>.xml` | the nodes, links, icons and labels |
+| `org.opennms.features.topology.plugins.topo.graphml-<name>.cfg` | `topologyLocation = <path of the xml>` and `label`: this file puts the view into the View menu |
+| `org.opennms.netmgt.graph.provider.graphml-<name>.cfg` | the same for the Graph API, `/opennms/api/v2/graphs` |
+
+OpenNMS writes all three when a GraphML file is uploaded (`POST /opennms/rest/graphml/<name>`; `./dev.sh up` uploads
+"DAS demo" this way), and loads the view when its cfg file appears in `etc/`. It reads the xml only then, and ignores later
+changes of the xml or the cfg ("Updating is not supported", `GraphMLMetaTopologyFactory`) until the cfg file goes away and
+comes back. REST does that with DELETE and POST; `./topo.sh deploy` does it for a changed view, whose cfg files leave for
+about 5 seconds.
+
+The parts of a GraphML file (all of it: `examples/assets/das-mine.graphml`; the demo: `seed/das-demo.graphml`):
+
+```xml
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="iconKey" for="node" attr.name="iconKey" attr.type="string"/> <!-- a <key> for each property used below -->
+  <data key="label">My DAS (GraphML)</data>                    <!-- the entry in the View menu -->
+  <graph id="das-mine" edgedefault="undirected">                <!-- a layer; a file may hold several -->
+    <data key="namespace">das-mine</data>                     <!-- required; no other view may use it -->
+    <data key="focus-strategy">ALL</data>                     <!-- ALL, FIRST (default), EMPTY, or SPECIFIC with focus-ids -->
+    <data key="semantic-zoom-level">1</data>
+    <data key="preferred-layout">Hierarchy Layout</data>      <!-- top to bottom by "level" -->
+    <data key="vertex-status-provider">default</data>         <!-- alarm colours of the OpenNMS nodes -->
+    <node id="orion-1">
+      <data key="label">orion-1</data>
+      <data key="iconKey">orion</data>                        <!-- an icon id of the svg folder, not a mapping key -->
+      <data key="foreignSource">DAS-Demo</data>               <!-- the OpenNMS node (or nodeID): status, alarms -->
+      <data key="foreignID">orion-1</data>
+      <data key="level">1</data>
+    </node>
+    <edge id="orion-1-helix-1" source="orion-1" target="helix-1"><data key="tooltipText">Q2</data></edge>
+  </graph>
+</graphml>
+```
+
+A node without `foreignSource` and `foreignID` (or `nodeID`) is a drawing only: a room, a site, a group. With several
+`<graph>` elements the view has layers; a link from a node of one layer to a node of another lets you go there (right-click).
+
+**With the kit:**
+
+```bash
+./topo.sh view list [dev|prod]             # the views there, with their View-menu labels
+./topo.sh view add my-view.graphml [name]  # checks the file, writes it and its two cfg files into opennms/, deploys to dev
+./topo.sh deploy dev                       # after a change of opennms/etc/graphml/<name>.xml: the view is loaded anew
+./topo.sh deploy prod                      # to production, with confirmation, backups/ and ./topo.sh undo
+./topo.sh view remove <name> [dev|prod]    # out of opennms/, and away there
+```
+
+`./topo.sh view add` checks what the GraphML reader of OpenNMS refuses (a `<data>` without its `<key>`, two nodes with one
+id, a link to an unknown node, no or a taken namespace), lists icon keys that no svg file defines, and replaces `@orion@`,
+`@helix@`, ... with the icon id of that word in the svg folder. `./topo.sh pull` copies production's views into `opennms/`
+with the other topology files (but not the demo view).
+
+- **Example 11** adds the view "My DAS (GraphML)": a room drawn above four demo nodes.
+
+Without the kit, through REST (there is no PUT: delete, then post again):
 
 ```bash
 curl -u admin -X DELETE http://<host>:8980/opennms/rest/graphml/<name>
 curl -u admin -X POST -H 'Content-Type: application/xml' --data-binary @<name>.xml http://<host>:8980/opennms/rest/graphml/<name>
 ```
+
+These calls answer in XML only: a client that asks for JSON (`Accept: application/json`) gets "HTTP 406 Not Acceptable",
+which OpenNMS 33.1.8 reports as HTTP 500.
 
 ## 6. The stylesheet: links, alarm frames, labels
 
@@ -174,5 +247,9 @@ Stock 33.1.8, at tag `opennms-33.1.8-1` of https://github.com/OpenNMS/opennms. Y
 | [`LinkdEdgeStatusProvider.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/plugins/org.opennms.features.topology.plugins.topo.linkd/src/main/java/org/opennms/features/topology/plugins/topo/linkd/internal/LinkdEdgeStatusProvider.java) | links `up` / `down` |
 | [`Topology.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/enlinkd/service/api/src/main/java/org/opennms/netmgt/enlinkd/service/api/Topology.java) | `getIconKey`: the Enhanced Linkd icon keys |
 | [`topo_default/styles.css`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/themes/default-theme/src/main/filtered/VAADIN/themes/topo_default/styles.css) | the stock stylesheet (section 6) |
+| [`GraphMLMetaTopologyFactory.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/plugins/org.opennms.features.topology.plugins.topo.graphml/src/main/java/org/opennms/features/topology/plugins/topo/graphml/internal/GraphMLMetaTopologyFactory.java) | loads a GraphML view when its cfg file appears, ignores updates (section 5) |
+| [`GraphMLReader.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/graphml/api/src/main/java/org/opennms/features/graphml/model/GraphMLReader.java) | what a GraphML file may hold: the checks of `./topo.sh view add` |
+| [`GraphmlRestService.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/graphml/rest/src/main/java/org/opennms/netmgt/graphml/rest/GraphmlRestService.java) | the GraphML REST calls (XML only) |
+| [`PathOutageProvider.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/plugins/org.opennms.features.topology.plugins.topo.pathoutage/src/main/java/org/opennms/features/topology/plugins/topo/pathoutage/PathOutageProvider.java) | the Path Outage view: each node under its parent, opened on one node at SZL 0 |
 | [`opennms-webapp/src/main/webapp/svg/`](https://github.com/OpenNMS/opennms/tree/opennms-33.1.8-1/opennms-webapp/src/main/webapp/svg) | the stock icon files |
 | [`opennms-base-assembly/.../etc/`](https://github.com/OpenNMS/opennms/tree/opennms-33.1.8-1/opennms-base-assembly/src/main/filtered/etc) | the stock mapping files and list |

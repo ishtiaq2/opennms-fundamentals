@@ -11,6 +11,9 @@
 #   ./topo.sh diff                  your changes since the pull
 #   ./topo.sh revert [file]         drop your changes since the pull (all, or one file), and deploy to dev
 #   ./topo.sh icons [dev|prod]      the icons in the svg files, and the icon each node gets
+#   ./topo.sh view [list [dev|prod]]          the GraphML views there: entries of the View menu
+#   ./topo.sh view add <file.graphml> [name]  a GraphML file becomes a view in opennms/ and on dev
+#   ./topo.sh view remove <name> [dev|prod]   takes a view out of opennms/ and away there
 source "$(dirname "$0")/tools/common.sh"
 
 WS=opennms                                       # the workspace: same paths as below /opt/opennms
@@ -19,6 +22,9 @@ SVG_DIR=jetty-webapps/opennms/svg
 STYLE_CSS=styles/topology.css                    # your CSS for the topology page reaches it in
 STYLE_PREFIX=zz-topology-styles                  # $SVG_DIR/zz-topology-styles.<hash>.svg (FILES.md, section 6)
 THEME_DIR=system/org/opennms/features/topology/themes/org.opennms.features.topology.themes.default-theme
+VIEW_CFG=etc/org.opennms.features.topology.plugins.topo.graphml # -<name>.cfg puts etc/graphml/<name>.xml in the View menu
+GRAPH_CFG=etc/org.opennms.netmgt.graph.provider.graphml         # -<name>.cfg: the same view for rest/api/v2/graphs
+DEMO_VIEW=das-demo                                              # the demo view of ./dev.sh: not pulled, not deployed
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -51,6 +57,31 @@ style_svg() {
   printf '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"><!-- Made by topo.sh from %s. -->\n<style><![CDATA[\n' "$STYLE_CSS"
   sed 's/]]>/]]]]><![CDATA[>/g' "$STYLE_CSS"
   printf ']]></style></svg>\n'
+}
+
+# GraphML views (FILES.md, section 5): etc/graphml/<name>.xml, and two cfg files with its place. OpenNMS loads a view
+# when its cfg file appears, and ignores later changes ("Updating is not supported"): a changed view must go away
+# for a moment and come back. view_unload takes the cfg files of these views out; the next copy brings them back.
+views_of() { # the names of the views that these files belong to
+  printf '%s\n' "$@" | sed -nE 's#^etc/graphml/(.+)\.xml$#\1#p; s#^etc/org\.opennms\.(features\.topology\.plugins\.topo|netmgt\.graph\.provider)\.graphml-(.+)\.cfg$#\2#p' | sort -u
+}
+views_loaded() { # views_loaded <dev|prod> <names...>: those whose cfg file the container has
+  local to=$1 v cfgs=()
+  shift
+  for v in "$@"; do cfgs+=("$VIEW_CFG-$v.cfg"); done
+  [ ${#cfgs[@]} -gt 0 ] || return 0
+  # shellcheck disable=SC2016 # runs in the container
+  tp "$to" exec "$(container_of "$to")" sh -c 'cd "$1" && shift && ls -1 "$@" 2>/dev/null; true' sh "$(home_of "$to")" "${cfgs[@]}" </dev/null |
+    sed -nE 's#^.*\.graphml-(.+)\.cfg$#\1#p'
+}
+view_unload() { # view_unload <dev|prod> <names...>
+  local to=$1 c home v
+  shift
+  [ $# -gt 0 ] || return 0
+  c=$(container_of "$to")
+  home=$(home_of "$to")
+  for v in "$@"; do tp "$to" exec "$c" rm -f "$home/$VIEW_CFG-$v.cfg" "$home/$GRAPH_CFG-$v.cfg" </dev/null; done
+  sleep 5 # Karaf looks at etc/ every few seconds; it has to see them gone
 }
 
 # Production keeps files in overlay folders that the image copies into OpenNMS at every start (tools/overlay.py).
@@ -121,6 +152,14 @@ pull() {
   for f in "${files[@]}"; do tp "$from" cp "$c:$home/$f" - | tar -xf - -C "$TMP/ws/etc"; done
   tp "$from" cp "$c:$home/$SVG_DIR" - | tar -xf - -C "$TMP/ws/jetty-webapps/opennms"
   rm -f "$TMP/ws/$SVG_DIR/$STYLE_PREFIX".*.svg # made from styles/topology.css
+  # GraphML views: their files and cfg files. The demo view of ./dev.sh stays out.
+  # shellcheck disable=SC2016 # runs in the container
+  mapfile -t files < <(tp "$from" exec "$c" sh -c 'cd "$1" && ls -1 etc/graphml/*.xml etc/org.opennms.features.topology.plugins.topo.graphml-*.cfg etc/org.opennms.netmgt.graph.provider.graphml-*.cfg 2>/dev/null; true' sh "$home" |
+    grep -v -e "^etc/graphml/$DEMO_VIEW\.xml\$" -e "graphml-$DEMO_VIEW\.cfg\$" || true)
+  for f in "${files[@]}"; do
+    mkdir -p "$TMP/ws/${f%/*}"
+    tp "$from" cp "$c:$home/$f" - | tar -xf - -C "$TMP/ws/${f%/*}"
+  done
   # The stock topology stylesheet, from the theme jar: for reading (FILES.md, section 6).
   # shellcheck disable=SC2016 # runs in the container
   jar=$(tp "$from" exec "$c" sh -c 'ls -1 "$1"/*/*.jar 2>/dev/null | tail -n 1' sh "$home/$THEME_DIR") || jar=''
@@ -136,13 +175,13 @@ sys.stdout.write(zipfile.ZipFile(sys.argv[1]).read("VAADIN/themes/topo_default/s
   mv "$TMP/ws" "$WS"
   cp -a "$WS" "$BASE"
   [ -f "$STYLE_CSS" ] || cp tools/topology.css.template "$STYLE_CSS"
-  say "  opennms/: $(find "$WS/etc" -type f | wc -l) settings files and $(find "$WS/$SVG_DIR" -type f | wc -l) icon files$([ -s reference/topo_default-styles.css ] && echo '; reference/: the stock stylesheet')"
+  say "  opennms/: $(find "$WS/etc" -maxdepth 1 -type f | wc -l) settings files, $(find "$WS/$SVG_DIR" -type f | wc -l) icon files, GraphML views: $(find "$WS/etc/graphml" -name '*.xml' 2>/dev/null | wc -l)$([ -s reference/topo_default-styles.css ] && echo '; reference/: the stock stylesheet')"
   [ "$from" = prod ] || return 0
   if running "$DEV_CONTAINER"; then deploy dev -q; else say "Start the development OpenNMS (./dev.sh up), then ./topo.sh deploy dev shows them there."; fi
 }
 
 deploy() {
-  local to=${1:-} yes=0 quiet=0 a c home stage remote f sum style='' ts bk ovl_mounts='' plan files=() changed=() stale=() ovl_plan=()
+  local to=${1:-} yes=0 quiet=0 a c home stage remote f v sum style='' ts bk ovl_mounts='' plan files=() changed=() stale=() ovl_plan=() names=() reload=()
   case $to in dev | prod) ;; *) die "usage: ./topo.sh deploy dev|prod [-y]" ;; esac
   shift
   for a in "$@"; do case $a in -y) yes=1 ;; -q) quiet=1 ;; esac; done
@@ -172,6 +211,19 @@ deploy() {
     [ "$quiet" = 1 ] || say "Nothing to deploy: $(name_of "$to") has these files already."
     return 0
   fi
+  # A changed GraphML view that is loaded there is loaded anew: its cfg files go away for a moment (view_unload) and
+  # come back with this deploy, also when only the .xml changed.
+  mapfile -t names < <(views_of "${changed[@]}")
+  mapfile -t reload < <(views_loaded "$to" "${names[@]}")
+  for v in "${reload[@]}"; do
+    for f in "$VIEW_CFG-$v.cfg" "$GRAPH_CFG-$v.cfg"; do
+      if [ ! -f "$stage/$f" ]; then # not in opennms/: the container's copy comes back
+        { tp "$to" cp "$c:$home/$f" - </dev/null 2>/dev/null | tar -xf - -C "$stage/etc"; } 2>/dev/null || continue
+        remote+=$'\n'"there  $f"
+      fi
+      [[ " ${changed[*]} " == *" $f "* ]] || changed+=("$f")
+    done
+  done
 
   if [ "$to" = prod ]; then # keep what production has now, for ./topo.sh undo
     ovl_mounts=$(overlay_mounts prod)
@@ -182,6 +234,7 @@ deploy() {
     say "Deploy to $(name_of prod):"
     [ ${#changed[@]} -eq 0 ] || printf '  %s\n' "${changed[@]}"
     [ ${#stale[@]} -eq 0 ] || printf '  remove %s\n' "${stale[@]}"
+    [ ${#reload[@]} -eq 0 ] || say "  GraphML views loaded anew (out of the View menu for about 5 seconds): ${reload[*]}"
     [ ${#ovl_plan[@]} -eq 0 ] || overlay_show
     confirm "$yes"
     ts=$(date +%Y%m%d-%H%M%S)
@@ -197,6 +250,7 @@ deploy() {
     done
     [ ${#ovl_plan[@]} -eq 0 ] || overlay_backup
   fi
+  view_unload "$to" "${reload[@]}"
   if [ ${#changed[@]} -gt 0 ]; then
     (cd "$stage" && tar -cf - "${changed[@]}") | tp "$to" cp - "$c:$home"
   fi
@@ -210,11 +264,12 @@ deploy() {
     esac
   done
   printf '%s deployed to %s: %s\n' "$(date +%T)" "$(name_of "$to")" "${changed[*]}${stale[*]:+ (removed ${stale[*]})}"
+  [ ${#reload[@]} -eq 0 ] || say "  GraphML views loaded anew: ${reload[*]}"
   [ "$quiet" = 1 ] || say "Reload the topology page. After a changed icon .svg press Ctrl+Shift+R: the browser may keep its old copy."
 }
 
 undo() {
-  local yes=0 bk c home f d line folder name files=() lines=()
+  local yes=0 bk c home f d line folder name files=() lines=() added=() names=() reload=()
   [ "${1:-}" != -y ] || yes=1
   bk=$(find backups -mindepth 1 -maxdepth 1 -type d ! -name '*.undone' 2>/dev/null | sort | tail -n 1)
   [ -n "$bk" ] || die "There is no production deploy to undo."
@@ -222,6 +277,9 @@ undo() {
   c=$PROD_CONTAINER
   home=$(home_of prod)
   mapfile -t files < <(cd "$bk" && find . -type f ! -path './.overlay/*' ! -name .added ! -name .overlay-added | sed 's|^\./||' | sort)
+  [ ! -f "$bk/.added" ] || mapfile -t added <"$bk/.added"
+  mapfile -t names < <(views_of "${files[@]}" "${added[@]}")
+  mapfile -t reload < <(views_loaded prod "${names[@]}")
   say "Undo the deploy of ${bk#backups/} on $(name_of prod):"
   [ ${#files[@]} -eq 0 ] || printf '  put back %s\n' "${files[@]}"
   [ ! -f "$bk/.added" ] || sed 's/^/  remove   /' "$bk/.added"
@@ -229,12 +287,11 @@ undo() {
     (cd "$bk/.overlay" && find . -type f | sed 's|^\./|  put back in /opt/|') | sort
   fi
   [ ! -f "$bk/.overlay-added" ] || awk -F'\t' '{ print "  remove from " $1 ": " $2 }' "$bk/.overlay-added"
+  [ ${#reload[@]} -eq 0 ] || say "  GraphML views loaded anew: ${reload[*]}"
   confirm "$yes"
+  view_unload prod "${reload[@]}"
   [ ${#files[@]} -eq 0 ] || (cd "$bk" && tar -cf - "${files[@]}") | pp cp - "$c:$home"
-  if [ -f "$bk/.added" ]; then # (a while-read loop would hand the list to ssh as its input)
-    mapfile -t files <"$bk/.added"
-    for f in "${files[@]}"; do pp exec "$c" rm -f "$home/$f" </dev/null; done
-  fi
+  for f in "${added[@]}"; do pp exec "$c" rm -f "$home/$f" </dev/null; done # (not while-read: ssh would eat the list)
   for d in "$bk"/.overlay/*/; do # the overlay folders as they were
     [ -d "$d" ] || continue
     (cd "$d" && find . -type f | sed 's|^\./||' | tar -cf - -T -) | pp cp - "$c:/opt/$(basename "$d")"
@@ -285,7 +342,116 @@ example() {
   sed -n 's/^# Look: /Look: /p' "$f"
 }
 
+# --- GraphML views: entries of the View menu (FILES.md, section 5) -----------------------------------------
+
+view_list() {
+  local to=${1:-dev} c home lines name label file
+  case $to in dev | prod) ;; *) die "usage: ./topo.sh view list [dev|prod]" ;; esac
+  check_target "$to"
+  c=$(container_of "$to")
+  home=$(home_of "$to")
+  # shellcheck disable=SC2016 # runs in the container
+  lines=$(tp "$to" exec "$c" sh -c 'cd "$1" && for f in etc/org.opennms.features.topology.plugins.topo.graphml-*.cfg; do
+      [ -f "$f" ] || continue; n=${f#*.graphml-}
+      printf "%s\t%s\t%s\n" "${n%.cfg}" "$(sed -n "s/^label *= *//p" "$f")" "$(sed -n "s/^topologyLocation *= *//p" "$f")"; done' sh "$home" </dev/null)
+  say "GraphML views in $(name_of "$to"); the View menu shows each label:"
+  [ -n "$lines" ] || { say "  none"; return 0; }
+  while IFS=$'\t' read -r name label file; do
+    printf '  %-18s %-30s %s%s\n' "$name" "\"$label\"" "${file#"$home"/}" "$([ ! -f "$WS/etc/graphml/$name.xml" ] || echo '   (also in opennms/)')"
+  done <<<"$lines"
+}
+
+view_add() {
+  local file=$1 name=${2:-} home label f others=()
+  [ -f "$file" ] || die "There is no file $file."
+  [ -d "$WS" ] || die "./topo.sh pull first: a view goes into opennms/ like the other topology files."
+  [ -n "$name" ] || name=$(basename "$file")
+  name=${name%.graphml}
+  name=${name%.xml}
+  [[ $name =~ ^[A-Za-z0-9._-]+$ ]] || die "A view name may hold letters, digits, dots, dashes and underscores: $name"
+  [ "$name" != "$DEMO_VIEW" ] || die "$DEMO_VIEW is the demo view of ./dev.sh; give yours another name."
+  check_target dev
+  home=$(home_of dev)
+  say "View $name, from $file:"
+  python3 tools/graphml.py prepare "$file" "$TMP/$name.xml" "$WS/$SVG_DIR"
+  # The other views, in opennms/ and on dev (such as the demo): namespaces must be unique.
+  for f in "$WS"/etc/graphml/*.xml; do [ ! -f "$f" ] || [ "$f" = "$WS/etc/graphml/$name.xml" ] || others+=("$f"); done
+  mkdir -p "$TMP/dev-views"
+  { p cp "$DEV_CONTAINER:$home/etc/graphml" - 2>/dev/null | tar -xf - -C "$TMP/dev-views"; } 2>/dev/null || true
+  for f in "$TMP"/dev-views/graphml/*.xml; do
+    [ ! -f "$f" ] || [ -f "$WS/etc/graphml/${f##*/}" ] || [ "${f##*/}" = "$name.xml" ] || others+=("$f")
+  done
+  python3 tools/graphml.py check "$TMP/$name.xml" "$WS/$SVG_DIR" "${others[@]}" || die "Nothing changed. Fix $file, then try again."
+  label=$(python3 tools/graphml.py label "$TMP/$name.xml" "$name")
+  mkdir -p "$WS/etc/graphml"
+  mv "$TMP/$name.xml" "$WS/etc/graphml/$name.xml"
+  printf '# Puts etc/graphml/%s.xml into the View menu of the topology page (./topo.sh view, FILES.md section 5).\ntopologyLocation = %s\nlabel = %s\n' \
+    "$name" "$home/etc/graphml/$name.xml" "$label" >"$WS/$VIEW_CFG-$name.cfg"
+  printf '# The same view for the Graph API (rest/api/v2/graphs).\ngraphLocation = %s\nlabel = %s\n' \
+    "$home/etc/graphml/$name.xml" "$label" >"$WS/$GRAPH_CFG-$name.cfg"
+  say "  opennms/etc/graphml/$name.xml, ${VIEW_CFG#etc/}-$name.cfg, ${GRAPH_CFG#etc/}-$name.cfg"
+  deploy dev -q
+  say "Reload the topology page: View lists \"$label\"."
+  say "Change opennms/etc/graphml/$name.xml, then ./topo.sh deploy dev; ./topo.sh deploy prod takes it to production."
+}
+
+view_remove() {
+  local name=$1 to=${2:-dev} c home f ts bk ovl_mounts='' plan present=() names=() changed=() stale=() files=() ovl_plan=()
+  case $to in dev | prod) ;; *) die "usage: ./topo.sh view remove <name> [dev|prod]" ;; esac
+  [ "$to" = dev ] || [ ! -f "$WS/etc/graphml/$name.xml" ] || say "opennms/ keeps view $name, so a later ./topo.sh deploy prod brings it back."
+  check_target "$to"
+  c=$(container_of "$to")
+  home=$(home_of "$to")
+  names=("$VIEW_CFG-$name.cfg" "$GRAPH_CFG-$name.cfg" "etc/graphml/$name.xml")
+  # shellcheck disable=SC2016 # runs in the container
+  mapfile -t present < <(tp "$to" exec "$c" sh -c 'cd "$1" && shift && ls -1 "$@" 2>/dev/null; true' sh "$home" "${names[@]}" </dev/null)
+  if [ ${#present[@]} -eq 0 ]; then
+    say "$(name_of "$to") has no view $name (./topo.sh view list $to)."
+  else
+    if [ "$to" = prod ]; then # the same care as a deploy: confirm, backups/ for ./topo.sh undo, the overlay folders
+      stale=("${present[@]}")
+      ovl_mounts=$(overlay_mounts prod)
+      if [ -n "$ovl_mounts" ]; then
+        plan=$(overlay_plan "$ovl_mounts") || die "Could not read the overlay folders of $PROD_CONTAINER."
+        [ -z "$plan" ] || mapfile -t ovl_plan <<<"$plan"
+      fi
+      say "Remove view $name from $(name_of prod):"
+      printf '  remove %s\n' "${present[@]}"
+      [ ${#ovl_plan[@]} -eq 0 ] || overlay_show
+      confirm 0
+      ts=$(date +%Y%m%d-%H%M%S)
+      bk="backups/$ts"
+      for f in "${present[@]}"; do
+        mkdir -p "$bk/${f%/*}"
+        pp cp "$c:$home/$f" - </dev/null | tar -xf - -C "$bk/${f%/*}"
+      done
+      [ ${#ovl_plan[@]} -eq 0 ] || overlay_backup
+    fi
+    view_unload "$to" "$name" # out of the View menu first
+    tp "$to" exec "$c" rm -f "$home/etc/graphml/$name.xml" </dev/null
+    if [ ${#ovl_plan[@]} -gt 0 ]; then overlay_write || warn "  (the overlay folders could not be updated: a restart of $PROD_CONTAINER would bring the view back)"; fi
+    say "$(date +%T) removed view $name from $(name_of "$to"). Reload the topology page."
+  fi
+  if [ "$to" = dev ] && [ -f "$WS/etc/graphml/$name.xml" ]; then
+    rm -f "$WS/etc/graphml/$name.xml" "$WS/$VIEW_CFG-$name.cfg" "$WS/$GRAPH_CFG-$name.cfg"
+    say "It is out of opennms/ too. If production has it: ./topo.sh view remove $name prod"
+  fi
+}
+
+view() {
+  case ${1:-list} in
+    list) view_list "${2:-dev}" ;;
+    add) [ -n "${2:-}" ] || die "usage: ./topo.sh view add <file.graphml> [name]"; view_add "$2" "${3:-}" ;;
+    remove) [ -n "${2:-}" ] || die "usage: ./topo.sh view remove <name> [dev|prod]"; view_remove "$2" "${3:-dev}" ;;
+    *) die "usage: ./topo.sh view [list [dev|prod] | add <file.graphml> [name] | remove <name> [dev|prod]]" ;;
+  esac
+}
+
 revert() {
+  local f v gone=()
+  if [ -z "${1:-}" ]; then # views added since the pull leave dev too
+    for f in "$WS"/etc/graphml/*.xml; do [ ! -f "$f" ] || [ -f "$BASE/etc/graphml/${f##*/}" ] || gone+=("$(basename "$f" .xml)"); done
+  fi
   if [ -n "${1:-}" ]; then
     local rel=${1#"$WS"/}
     if [ "$rel" = "$STYLE_CSS" ]; then
@@ -299,6 +465,7 @@ revert() {
   fi
   say "Reverted. Deploying to dev:"
   deploy dev
+  for v in "${gone[@]}"; do view_remove "$v" dev; done
 }
 
 case ${1:-} in
@@ -312,6 +479,7 @@ case ${1:-} in
     diff -u tools/topology.css.template "$STYLE_CSS" || true
     ;;
   revert) revert "${2:-}" ;;
+  view) view "${@:2}" ;;
   icons)
     case ${2:-dev} in
       dev) python3 tools/icons.py "http://localhost:$DEV_PORT/opennms" "$DEV_USER" "$DEV_PASSWORD" ;;
@@ -320,7 +488,7 @@ case ${1:-} in
     esac
     ;;
   *)
-    sed -n '2,14p' "$0"
+    sed -n '2,16p' "$0"
     exit 2
     ;;
 esac

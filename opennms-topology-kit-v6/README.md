@@ -47,7 +47,8 @@ The addresses, names and images are in `kit.env`.
 5. It starts the image with PostgreSQL 14, the way production starts it: as root, privileged, `unmask=all`
    (`DEV_PODMAN_ARGS` in `kit.env`; `./dev.sh prod-info` shows production's). The first start takes 5-10 minutes.
    Health checks that need production's other containers may never pass in dev: after 3 minutes it lists them and goes on.
-6. It adds demo DAS nodes: orion-1, helix-1, stratus-1/2 and nimbus-1/2, with links, a GraphML view "DAS demo" and one alarm.
+6. It adds demo DAS nodes: orion-1, helix-1, stratus-1/2 and nimbus-1/2, with parents, links, a GraphML view "DAS demo"
+   and one alarm (section 4, "The demo").
 7. It logs in the way a browser does and says what went wrong if that fails (`./dev.sh status` does it again).
 
 When it is done, open **http://192.168.0.47:8980/opennms/topology** (admin / admin) from any computer.
@@ -59,12 +60,13 @@ show has no such field, `./dev.sh up` gives dev's copy one and says so; producti
 ## 2. Learn, change, look
 
 ```bash
-./topo.sh example        # the ten examples, one per file and effect (FILES.md has the details)
+./topo.sh example        # the eleven examples, one per file and effect (FILES.md has the details)
 ./topo.sh example 7      # apply one: it changes files in opennms/ or styles/ and deploys them to dev
 ./topo.sh diff           # everything you changed since the pull
 ./topo.sh revert         # drop your changes (or one file: ./topo.sh revert <file>)
 ./topo.sh watch          # deploy every save to dev, while you edit files in opennms/ and styles/
 ./topo.sh icons          # every icon id, and the icon each node gets (./topo.sh icons prod: production's nodes)
+./topo.sh view           # the GraphML views: entries of the View menu (add, remove: FILES.md, section 5)
 ```
 
 Reload the topology page after a deploy. After a replaced icon file, press Ctrl+Shift+R, so the browser drops its old copy.
@@ -90,6 +92,54 @@ icons of the overlay, and `./topo.sh undo` puts all of it back. Mapping files li
 and need no copy of their own. Where production mounts no overlay folder, the files in `jetty-webapps` exist
 only in the container, and a re-created container starts without them.
 
+**Backups.** Each production deploy (and `./topo.sh view remove <name> prod`) first saves what it changes in
+`backups/<date>-<time>/`: the files it replaces or removes, at their paths below `/opt/opennms`; `.added`, the files it
+adds; `.overlay/` and `.overlay-added`, the same for the overlay folders. `./topo.sh undo` reverses the newest one and
+renames it `<date>-<time>.undone`; run it again to go one deploy further back. `find backups -type f` lists them all.
+
+## 4. What is where
+
+**This machine**, in the kit folder. Names that start with a dot are hidden: `ls -a` shows them.
+
+| Folder | What it holds | Comes from |
+|---|---|---|
+| `opennms/` | the topology files you change: `etc/org.opennms.features.topology.app*.cfg`, `...icons.list`, GraphML views (`etc/graphml/*.xml` and their cfg files), `jetty-webapps/opennms/svg/*.svg` | production, `./topo.sh pull` |
+| `styles/topology.css` | your CSS for the topology page | the kit |
+| `reference/topo_default-styles.css` | the stock stylesheet, for reading | production's theme jar, `./topo.sh pull` |
+| `.kit/baseline/` | `opennms/` as pulled, for `./topo.sh diff` and `revert` | `./topo.sh pull` |
+| `.kit/overlays/opennms-overlay/` | production's `/opt/opennms-overlay` without `etc/`, and the dev-only login page if one was needed | production, `./dev.sh up` |
+| `.kit/overlays/opennms-jetty-webapps-overlay/` | production's `/opt/opennms-jetty-webapps-overlay` | production, `./dev.sh up` |
+| `backups/` | what each production deploy replaced (section 3) | `./topo.sh deploy prod` |
+| `.kit/opennms-start.log` | the log of a start that failed | `./dev.sh up` |
+
+```bash
+find .kit/overlays -type f     # every file dev got from production's overlay folders
+find opennms -type f | sort    # the topology files
+./topo.sh diff                 # what you changed in them since the pull
+```
+
+**Not copied from production:** its configuration (`/opt/opennms/etc` and the etc overlay), its database with its
+nodes, and its other containers (`maven-nms`, `postgres-database`). Dev keeps its own configuration and PostgreSQL,
+and gets the demo below.
+
+**Inside the containers**, below `/opt/opennms`:
+
+```bash
+podman exec onms-dev-core ls /opt/opennms/jetty-webapps/opennms/svg            # dev
+ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml  # production
+./dev.sh prod-info             # production: volumes, the files of its overlay folders, web settings
+```
+
+**The demo** (`./dev.sh up` adds it to dev only, from `seed/`; it runs again when a new kit version changes it):
+
+| What | Where you see it |
+|---|---|
+| 6 nodes in requisition DAS-Demo: orion-1; helix-1, stratus-1 and stratus-2 under it; nimbus-1 and nimbus-2 under helix-1 | Info > Nodes, and the Status Overview of the start page, which also counts nodes your image adds itself. `./dev.sh status` lists the nodes per requisition. |
+| a model number (sysObjectID) for each type, and the links between the nodes | View > Enhanced Linkd: the icons by model (`linkd.system.snmp.1.3.6.1.4.1.99999.1.<n>`) and the links |
+| the same DAS as a GraphML view | View > DAS demo (GraphML) |
+| each node's parent | View > Path Outage: each node under its parent. It opens on one node at semantic zoom level 0: press "Increase Semantic Zoom Level" in the toolbar twice, or open the Path Outage link of `./dev.sh status`. |
+| one nodeDown event for nimbus-2 | Alarms: nimbus-2, Major, "Node is down", and its status colour on the maps. It is there to show alarm colours; clear it on the alarm page. |
+
 ## Commands
 
 | | |
@@ -101,6 +151,7 @@ only in the container, and a re-created container starts without them.
 | `./topo.sh pull [prod\|dev]` | copy the topology files into `opennms/` (from production: also onto dev) |
 | `./topo.sh deploy dev\|prod [-y]`, `./topo.sh undo [-y]` | hot deploy; undo the last production deploy |
 | `./topo.sh watch`, `example [N]`, `diff`, `revert [file]`, `icons [dev\|prod]` | see section 2 |
+| `./topo.sh view [list [dev\|prod]]`, `view add <file> [name]`, `view remove <name> [dev\|prod]` | GraphML views (FILES.md, section 5) |
 
 ## When something goes wrong
 
@@ -127,6 +178,11 @@ only in the container, and a re-created container starts without them.
 - **Dev stops starting after it copied production's overlay folders**: set `DEV_PROD_OVERLAYS=no` in `kit.env`
   and run `./dev.sh up`; `./dev.sh prod-info` lists what those folders hold.
 - **The demo nodes fail with HTTP 401**: your image has another admin password. Set `DEV_USER` and `DEV_PASSWORD` in `kit.env`.
+- **A health check says "Bundle 81 is waiting for dependencies"**: a Karaf bundle of the image cannot start in dev, often
+  one that needs production's other containers. To see which one and what it waits for: `ssh -p 8101 admin@localhost`
+  (password admin), then `bundle:diag 81`. The topology page works without it.
+- **A GraphML view is not in the View menu**: `./topo.sh view list` shows whether its cfg file is there; reload the
+  page. `./dev.sh logs` (karaf.log) names the error if OpenNMS could not read the file.
 - **The page is "unreachable" from your computer**: the firewall. Run
   `sudo firewall-cmd --permanent --add-port=8980/tcp && sudo firewall-cmd --reload`.
 - **"Permission denied" on `./dev.sh`**: the files were unpacked without their executable bit. Run `chmod +x dev.sh topo.sh`.
