@@ -20,6 +20,7 @@ OPENNMS=/opt/opennms
 START_LOG=.kit/opennms-start.log
 ME=${USER:-$(id -un)}
 heap=''
+DEV_PODMAN_ARGS="--user 0:0 --privileged --security-opt unmask=all"
 
 mem_mb() { awk -v key="$1:" '$1 == key { print int($2 / 1024) }' /proc/meminfo; } # MemTotal, MemAvailable
 clock() { local s=$((SECONDS - $1)); printf '%d:%02d' $((s / 60)) $((s % 60)); }
@@ -151,7 +152,6 @@ create_stack() {
     -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
     -v "$DEV_POD-pgdata:/var/lib/postgresql/data" "$PG_IMAGE" >/dev/null
   for kv in $DEV_ENV; do env_args+=(-e "$kv"); done
-  for cap in $DEV_CAP_ADD; do cap_args+=(--cap-add "$cap"); done
   read -r -a extra_args <<<"$DEV_PODMAN_ARGS"
   # OpenNMS keeps its configuration and data in volumes and in PostgreSQL: another image, heap, variables
   # or run options only re-create the container.
@@ -160,7 +160,7 @@ create_stack() {
     [ "$(p container inspect -f "{{index .Config.Labels \"$CORE_LABEL\"}}" "$DEV_CONTAINER")" != "$core_id" ]; then
     p rm -f -v -t 60 "$DEV_CONTAINER" >/dev/null
   fi
-  p container exists "$DEV_CONTAINER" || p create --pod "$DEV_POD" --name "$DEV_CONTAINER" --label "$CORE_LABEL=$core_id" \
+  p container exists "$DEV_CONTAINER" || p create --pod "$DEV_POD" --name "$DEV_CONTAINER" --label "$CORE_LABEL=$core_id" --cap-add NET_RAW --cap-add NET_BIND_SERVICE \
     "${cap_args[@]}" "${extra_args[@]}" \
     -e POSTGRES_HOST=127.0.0.1 -e POSTGRES_PORT=5432 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
     -e OPENNMS_DBNAME=opennms -e OPENNMS_DBUSER=opennms -e OPENNMS_DBPASS=opennms \
