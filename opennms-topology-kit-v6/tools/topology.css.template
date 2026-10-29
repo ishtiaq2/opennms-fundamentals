@@ -3,7 +3,8 @@
    file of that folder into the topology page, so these rules apply there. Start a rule with "svg" to
    win over the stock stylesheet (reference/topo_default-styles.css), and a rule for a part of an icon
    with the id of its drawing (./topo.sh css <icon id> prints such rules).
-   To see a change: open the page in a new tab after the first deploy of this file, and reload with
-   the browser cache off (F12 > Network > Disable cache). FILES.md, section 6, lists what OpenNMS
-   draws; examples 07-09 and 12 add rules here. ./topo.sh css prod says whether production has the
-   file and serves it; the guide, steps 6.2 and 6.4, shows a label that names the version a page has. */
+   To see a change: open the page in a new tab after the first deploy of this file, then reload.
+   Production gets this file only with ./topo.sh deploy prod; ./topo.sh css prod says whether it has
+   your latest version and serves it. FILES.md, section 6, lists what OpenNMS draws; examples 07-09
+   and 12 add rules here. The guide, steps 6.2 and 6.4, shows a label that names the version a page
+   has, and ./topo.sh pagecheck says what the page loaded. */
