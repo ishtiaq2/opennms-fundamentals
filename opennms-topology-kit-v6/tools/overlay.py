@@ -20,6 +20,7 @@ stdout, one line per action, fields separated by tabs:
   skip  -  -  <file>  -               a changed file that has no place in any overlay folder
 """
 import os
+import re
 import sys
 
 JETTY, ROOT, ETC = '/opt/opennms-jetty-webapps-overlay', '/opt/opennms-overlay', '/opt/opennms-etc-overlay'
@@ -68,11 +69,19 @@ def copies(path):
     return found
 
 
+def kind(path):
+    """Files of one kind: the same folder; for factory configurations (<pid>-<name>.cfg, such as the cfg files of
+    GraphML views) also the same pid, so they do not follow the icon mappings of the same folder."""
+    folder, name = os.path.split(path)
+    factory = re.match(r'(.+)-[^-]+\.cfg$', name)
+    return folder, factory.group(1) if factory else None
+
+
 def new_home(path):
-    """(folder, name) for a file no overlay folder has: next to the files of the same folder that it has."""
-    here, votes = os.path.dirname(path), {}
+    """(folder, name) for a file no overlay folder has: next to the files of its kind that it has."""
+    here, votes = kind(path), {}
     for other in everything:
-        if other != path and os.path.dirname(other) == here:
+        if other != path and kind(other) == here:
             for folder, name in copies(other):
                 key = (folder, os.path.dirname(name))
                 votes[key] = votes.get(key, 0) + 1

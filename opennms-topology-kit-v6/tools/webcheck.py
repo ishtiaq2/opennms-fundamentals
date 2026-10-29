@@ -2,6 +2,8 @@
 """What a browser gets from an OpenNMS web UI. ./dev.sh up and ./dev.sh status use this.
 
   webcheck.py health <base> <user> <password>   the health checks that do not pass (rest/health)
+  webcheck.py nodes <base> <user> <password> [<address for a browser>]
+                                                how many nodes each requisition has; a link to the Path Outage view
   webcheck.py login <base> <user> <password>    log in the way a browser does: login page, session cookie,
                                                 CSRF token, POST to j_spring_security_check, next page
   webcheck.py page <base>                       only the login page: its CSRF token field and session cookie
@@ -37,11 +39,13 @@ class Browser:
         self.http = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(self.jar), urllib.request.HTTPSHandler(context=TLS), NoRedirect)
 
-    def get(self, url, data=None, auth=None, hops=5):
+    def get(self, url, data=None, auth=None, hops=5, accept=None):
         """(status, final url, headers of each answer, body). Follows redirects itself, so it sees every cookie."""
         answers = []
         for _ in range(hops):
             request = urllib.request.Request(url, data=data)
+            if accept:
+                request.add_header('Accept', accept)
             if auth:
                 request.add_header('Authorization', 'Basic ' + base64.b64encode(auth.encode()).decode())
             try:
@@ -130,6 +134,32 @@ def health(base, user, password):
     return 1
 
 
+def nodes(base, user, password, public=None):
+    status, _, _, body = Browser().get(base + '/rest/nodes?limit=0', auth=user + ':' + password, accept='application/json')
+    try:
+        found = json.loads(body).get('node') or []
+    except ValueError:
+        print('  Nodes          (rest/nodes answered HTTP %s)' % status)
+        return 1
+    groups = {}
+    for n in found if isinstance(found, list) else [found]:
+        groups.setdefault(n.get('foreignSource') or '(no requisition)', []).append(n.get('label') or n.get('id'))
+    parts = []
+    for source, labels in sorted(groups.items(), key=lambda kv: (kv[0] != 'DAS-Demo', kv[0])):
+        if source == 'DAS-Demo':
+            parts.append('%d in requisition DAS-Demo (the demo of the kit)' % len(labels))
+            continue
+        names = ', '.join(sorted(labels)[:5]) + (', ...' if len(labels) > 5 else '')
+        where = 'without requisition' if source == '(no requisition)' else 'in requisition ' + source
+        parts.append('%d %s: %s' % (len(labels), where, names))
+    print('  Nodes          %d: %s' % (len(found) if isinstance(found, list) else 1, '; '.join(parts) or 'none'))
+    orion = [n for n in (found if isinstance(found, list) else [found])
+             if n.get('foreignSource') == 'DAS-Demo' and n.get('foreignId') == 'orion-1']
+    if orion:  # the view opens on one node at zoom level 0; this link opens the DAS tree (TopologyLinkBuilder)
+        print('  Path Outage    %s/topology?provider=Path%%20Outage&szl=2&focus-vertices=%s' % (public or base, orion[0]['id']))
+    return 0
+
+
 def page(base):
     b = Browser()
     try:
@@ -206,13 +236,15 @@ def login(base, user, password):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 3 or sys.argv[1] not in ('health', 'login', 'page'):
+    if len(sys.argv) < 3 or sys.argv[1] not in ('health', 'nodes', 'login', 'page'):
         sys.exit(__doc__)
     command, args = sys.argv[1], sys.argv[2:]
     base = args[0].rstrip('/')
     try:
         if command == 'health':
             sys.exit(health(base, args[1], args[2]))
+        if command == 'nodes':
+            sys.exit(nodes(base, args[1], args[2], args[3].rstrip('/') if len(args) > 3 else None))
         if command == 'login':
             sys.exit(login(base, args[1], args[2]))
         sys.exit(page(base))

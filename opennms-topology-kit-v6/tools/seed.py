@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Demo DAS for the development OpenNMS (called by ./dev.sh up).
+"""Demo DAS for the development OpenNMS (called by ./dev.sh up; README, "The demo").
 
-Six nodes without IP interfaces (nothing is polled) in requisition DAS-Demo, a SNMP sysObjectID per
-type so Enhanced Linkd gives them icon keys like a real device, user-defined links between them, the
-GraphML view "DAS demo" and one nodeDown alarm (a coloured status frame).
+Six nodes without IP interfaces (nothing is polled) in requisition DAS-Demo, each with a parent node (the Path
+Outage view draws them as a tree), a SNMP sysObjectID per type so Enhanced Linkd gives them icon keys like a real
+device, user-defined links between them, the GraphML view "DAS demo" and one nodeDown alarm (a coloured status frame).
 """
 import argparse
 import base64
@@ -107,11 +107,13 @@ def main():
                 next((i for i in sorted(ids) if kind in i.lower()), None)
             graph = graph.replace(f'@{kind}@', own or stock)
             print(f'  {kind}: icon {own or stock}' + ('' if own else ' (stock; no ' + kind + ' icon in the svg folder)'))
+        # The GraphML REST calls answer in XML only (@Produces application/xml): Accept JSON gets "406 Not Acceptable".
         try:
-            rest('DELETE', '/rest/graphml/das-demo')
+            rest('DELETE', '/rest/graphml/das-demo', accept='application/xml')
+            time.sleep(5)  # Karaf must see the view's cfg file gone before it comes back, or it keeps the old view
         except RuntimeError:
             pass  # not there yet
-        rest('POST', '/rest/graphml/das-demo', graph)
+        rest('POST', '/rest/graphml/das-demo', graph, accept='application/xml')
 
     def alarm():
         rest('POST', '/rest/events', '<event xmlns="http://xmlns.opennms.org/xsd/event">'
