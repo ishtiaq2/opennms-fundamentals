@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Example 11: a View-menu entry of your own (FILES.md, section 5). ./topo.sh view add copies this file to
+     opennms/etc/graphml/das-mine.xml, with @orion@, @helix@ and @nimbus@ replaced by the icon id of that word in
+     the svg folder, writes its two .cfg files and deploys them to the development OpenNMS. -->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <!-- Every <data key="..."> needs a <key> with that id; attr.name is the property OpenNMS reads. -->
+  <key id="label" for="graphml" attr.name="label" attr.type="string"/>
+  <key id="label" for="graph" attr.name="label" attr.type="string"/>
+  <key id="namespace" for="graph" attr.name="namespace" attr.type="string"/>
+  <key id="description" for="graph" attr.name="description" attr.type="string"/>
+  <key id="focus-strategy" for="graph" attr.name="focus-strategy" attr.type="string"/>
+  <key id="semantic-zoom-level" for="graph" attr.name="semantic-zoom-level" attr.type="int"/>
+  <key id="preferred-layout" for="graph" attr.name="preferred-layout" attr.type="string"/>
+  <key id="vertex-status-provider" for="graph" attr.name="vertex-status-provider" attr.type="string"/>
+  <key id="label" for="node" attr.name="label" attr.type="string"/>
+  <key id="iconKey" for="node" attr.name="iconKey" attr.type="string"/>
+  <key id="foreignSource" for="node" attr.name="foreignSource" attr.type="string"/>
+  <key id="foreignID" for="node" attr.name="foreignID" attr.type="string"/>
+  <key id="level" for="node" attr.name="level" attr.type="int"/>
+  <key id="tooltipText" for="all" attr.name="tooltipText" attr.type="string"/>
+
+  <data key="label">My DAS (GraphML)</data>                         <!-- the entry in the View menu -->
+  <graph id="das-mine" edgedefault="undirected">
+    <data key="namespace">das-mine</data>                          <!-- required; no other view may use it -->
+    <data key="label">Head-end and floor 1</data>                  <!-- the name of this layer -->
+    <data key="description">Example 11 of the topology kit</data>  <!-- shown in the Info panel -->
+    <data key="focus-strategy">ALL</data>                          <!-- every node is shown when the view opens -->
+    <data key="semantic-zoom-level">1</data>
+    <data key="preferred-layout">Hierarchy Layout</data>           <!-- top to bottom by "level" -->
+    <data key="vertex-status-provider">default</data>              <!-- alarm colours of the OpenNMS nodes -->
+
+    <!-- A node that is no OpenNMS node: a room, a site, a group. It has an icon and a label, no status. -->
+    <node id="headend"><data key="label">Head-end room</data><data key="iconKey">cloud</data>
+      <data key="level">0</data><data key="tooltipText">Building A, basement</data></node>
+
+    <!-- Nodes tied to OpenNMS nodes by requisition and foreign id: they show their alarms. -->
+    <node id="orion-1"><data key="label">orion-1</data><data key="iconKey">@orion@</data><data key="level">1</data>
+      <data key="foreignSource">DAS-Demo</data><data key="foreignID">orion-1</data></node>
+    <node id="helix-1"><data key="label">helix-1</data><data key="iconKey">@helix@</data><data key="level">2</data>
+      <data key="foreignSource">DAS-Demo</data><data key="foreignID">helix-1</data></node>
+    <node id="nimbus-1"><data key="label">nimbus-1 (floor 1 east)</data><data key="iconKey">@nimbus@</data><data key="level">3</data>
+      <data key="foreignSource">DAS-Demo</data><data key="foreignID">nimbus-1</data></node>
+    <node id="nimbus-2"><data key="label">nimbus-2 (floor 1 west)</data><data key="iconKey">@nimbus@</data><data key="level">3</data>
+      <data key="foreignSource">DAS-Demo</data><data key="foreignID">nimbus-2</data></node>
+
+    <edge id="headend-orion-1" source="headend" target="orion-1"><data key="tooltipText">in rack 3</data></edge>
+    <edge id="orion-1-helix-1" source="orion-1" target="helix-1"><data key="tooltipText">Q2 - QSFP+ 40G</data></edge>
+    <edge id="helix-1-nimbus-1" source="helix-1" target="nimbus-1"><data key="tooltipText">S1 - SFP28 25G</data></edge>
+    <edge id="helix-1-nimbus-2" source="helix-1" target="nimbus-2"><data key="tooltipText">S2 - SFP28 25G</data></edge>
+  </graph>
+</graphml>
