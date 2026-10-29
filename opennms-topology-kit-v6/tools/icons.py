@@ -43,11 +43,15 @@ def properties(path):
     return out
 
 
+DEFINED = set()  # every id of every svg file: <use href="#id"> draws any of them (GWTVertex)
+
+
 def svg_icons():
     """{icon id: (file, missing state groups)} for every <g id="<id>_icon"> in the svg folder."""
     found = {}
     for f in sorted(SVG.glob('*.svg')):
         ids = set(re.findall(r'\bid="([^"]+)"', f.read_text(errors='replace')))
+        DEFINED.update(ids)
         for icon in sorted(i[:-5] for i in ids if i.endswith('_icon')):
             found[icon] = (f.name, [s for s in (icon, icon + '_rollover', icon + '_active') if s not in ids])
     return found
@@ -87,7 +91,7 @@ def main():
                 return hit[0], f'{key} in {hit[1]}'
             if key == 'default':
                 return None, 'no "default" mapping'
-            if '.' not in key and key in icons:
+            if '.' not in key and key != 'default':  # GraphMLIconRepository: the icon key is the icon id, svg or not
                 return key, 'GraphML: the icon key is the icon id'
             key = key.rsplit('.', 1)[0] if '.' in key else 'default'
         hit = lookup('default')
@@ -125,7 +129,7 @@ def main():
             print(f"  View \"{graph.get('label') or container.get('label')}\" (namespace {graph['namespace']}), {len(vertices)} node(s)")
             for v in vertices[:200]:
                 icon, rule = resolve(v.get('namespace', graph['namespace']), v.get('id'), v.get('iconKey'))
-                flag = '' if icon in icons else '   ! no svg defines this icon: the node shows none'
+                flag = '' if icon in DEFINED else '   ! no svg defines this icon: the node shows none'
                 print(f"    {str(v.get('label'))[:22]:<22} key {str(v.get('iconKey'))[:44]:<44} -> {icon}  ({rule}){flag}")
             if len(vertices) > 200:
                 print(f'    ... and {len(vertices) - 200} more')

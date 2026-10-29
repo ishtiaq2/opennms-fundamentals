@@ -12,8 +12,11 @@
       folder: the same id, else an id that contains the word
   graphml.py show <file> <svg folder> <etc folder>
       the layers and nodes of a view: node id, label, icon key, the icon OpenNMS draws (a "<namespace>.<node id>"
-      line in an icon mapping file of <etc folder> wins over the icon key: IconRepositoryManager.getSVGIconId),
-      and the key to write for a node of your own choice
+      line in an icon mapping file of <etc folder> wins over the icon key: IconRepositoryManager.getSVGIconId);
+      lines that name a node of the view with another namespace are reported: OpenNMS ignores them
+  graphml.py icon <file> <icon mapping file> <svg folder> <node id> <icon id | --reset>
+      writes the line "<namespace>.<node id> = <icon id>" into the icon mapping file (the namespace is the one of
+      the node's layer, a colon is escaped); --reset takes the line out again
 """
 import re
 import sys
@@ -30,6 +33,20 @@ def icon_ids(svg_folder):
     for f in Path(svg_folder).glob('*.svg'):
         ids.update(re.findall(r'id="([^"]+)_icon"', f.read_text(errors='replace')))
     return ids
+
+
+def defined_ids(svg_folder):
+    """Every id="..." of the svg files. OpenNMS draws a node with <use href="#<icon id>"> (GWTVertex): any element
+    with that id will do, so this is what an icon id must be in (icon_ids lists the ones that are icons)."""
+    ids = set()
+    for f in Path(svg_folder).glob('*.svg'):
+        ids.update(m.group(2) for m in re.finditer(r'(?<![\w:.-])id\s*=\s*(["\'])(.*?)\1', f.read_text(errors='replace')))
+    return ids
+
+
+def similar(word, ids):
+    """Up to three icon ids that contain word: das_helix for helix."""
+    return sorted(i for i in ids if word.lower() in i.lower() and i != word)[:3]
 
 
 def properties(root, element, kind):
@@ -99,7 +116,7 @@ def check(path, svg_folder, others):
                 used[g['props'].get('namespace')] = Path(other).name
         except Exception:  # a broken other view is not this one's problem
             pass
-    ids, problems, missing = icon_ids(svg_folder), rules(root), set()
+    ids, problems, missing = defined_ids(svg_folder), rules(root), set()
     print('  View menu label: %s' % (label or '(none: the name of the view)'))
     for g in graphs:
         ns = g['props'].get('namespace')
@@ -124,23 +141,30 @@ def check(path, svg_folder, others):
     return 1 if problems else 0
 
 
+def split_property(raw):
+    """(key, value) of a line of a java.util.Properties file, None for a blank or comment line: '=' ':' or blanks
+    follow the key, a backslash escapes the next character."""
+    line = raw.lstrip()
+    if not line or line[0] in '#!':
+        return None
+    key, i = '', 0
+    while i < len(line) and line[i] not in '=: \t\f':
+        if line[i] == '\\' and i + 1 < len(line):
+            i += 1
+        key += line[i]
+        i += 1
+    value = line[i:].lstrip(' \t\f')
+    if value[:1] in ('=', ':'):
+        value = value[1:]
+    return key, value.strip()
+
+
 def java_properties(path):
-    """java.util.Properties, enough for icon mappings: # and ! comments, '=' ':' or blanks after the key, \\ escapes."""
     out = {}
     for raw in Path(path).read_text(errors='replace').splitlines():
-        line = raw.lstrip()
-        if not line or line[0] in '#!':
-            continue
-        key, i = '', 0
-        while i < len(line) and line[i] not in '=: \t\f':
-            if line[i] == '\\' and i + 1 < len(line):
-                i += 1
-            key += line[i]
-            i += 1
-        value = line[i:].lstrip(' \t\f')
-        if value[:1] in ('=', ':'):
-            value = value[1:]
-        out[key] = value.strip()
+        kv = split_property(raw)
+        if kv:
+            out[kv[0]] = kv[1]
     return out
 
 
@@ -149,13 +173,59 @@ def escaped(key):
     return re.sub(r'([\\:= ])', r'\\\1', key)
 
 
-def show(path, svg_folder, etc_folder):
-    root, graphs = read(path)
-    ids, maps = icon_ids(svg_folder), {}
+def load_maps(etc_folder):
+    """{key: (icon id, file name)} of the icon mapping files in etc_folder."""
+    maps = {}
     for f in sorted(Path(etc_folder).glob('org.opennms.features.topology.app.icons.*.cfg')):
         for k, v in java_properties(f).items():
             maps.setdefault(k, (v, f.name))
-    default = maps.get('default', ('generic', ''))[0]
+    return maps
+
+
+def icon_of(ns, node, maps):
+    """(icon id, why) OpenNMS draws for a node: the line for the node, else its iconKey, else the default icon."""
+    key = '%s.%s' % (ns, node['id'])
+    if key in maps:
+        return maps[key][0], 'the line %s in %s' % (escaped(key), maps[key][1])
+    if node.get('iconKey'):
+        return node['iconKey'], 'its iconKey'
+    return maps.get('default', ('generic', ''))[0], 'default'
+
+
+def other_namespaces(etc_folder, name):
+    """The namespaces of the views in etc_folder/graphml, except the view name."""
+    found = set()
+    for f in Path(etc_folder, 'graphml').glob('*.xml'):
+        if f.stem != name:
+            try:
+                found |= {g['props'].get('namespace') for g in read(f)[1]}
+            except Exception:  # a broken other view is not this one's problem
+                pass
+    return found
+
+
+def stray_lines(graphs, maps, others):
+    """[(node id, sentence)] for the mapping lines that OpenNMS ignores in this view: the namespace of the line is not
+    the one of the view (the usual slip: the namespace of an example), or the node id is not in the view."""
+    by_ns = {g['props'].get('namespace'): {n['id'] for n in g['nodes']} for g in graphs}
+    found = []
+    for key, (icon, file) in sorted(maps.items()):
+        prefix, _, rest = key.partition('.')
+        if rest and prefix in by_ns and rest not in by_ns[prefix]:
+            found.append((rest, 'the line "%s" in %s names no node of the namespace %s' % (escaped(key), file, prefix)))
+        elif rest and prefix not in by_ns and prefix not in others and any(rest in ids for ids in by_ns.values()):
+            ns = next(n for n, ids in by_ns.items() if rest in ids)
+            right = '%s.%s' % (escaped(ns), rest)
+            hint = ('Delete it: the line "%s" is there.' if '%s.%s' % (ns, rest) in maps else 'The line "%s" would work.') % right
+            found.append((rest, 'the line "%s" in %s does nothing: the namespace of this view is %s. %s'
+                          % (escaped(key), file, ns, hint)))
+    return found
+
+
+def show(path, svg_folder, etc_folder):
+    root, graphs = read(path)
+    name = Path(path).stem
+    icons, defined, maps = icon_ids(svg_folder), defined_ids(svg_folder), load_maps(etc_folder)
     print('View menu label: %s' % (properties(root, root, 'graphml').get('label') or '(none: the name of the view)'))
     for g in graphs:
         p, ns = g['props'], g['props'].get('namespace', '?')
@@ -164,20 +234,80 @@ def show(path, svg_folder, etc_folder):
             p.get('focus-strategy', 'FIRST'), p.get('semantic-zoom-level', '1'), p.get('vertex-status-provider', 'none')))
         print('  %-16s %-28s %-20s %s' % ('node id', 'label', 'iconKey', 'icon drawn'))
         for n in g['nodes'][:300]:
-            key = '%s.%s' % (ns, n['id'])
-            if key in maps:
-                drawn, why = maps[key][0], 'the line %s in %s' % (escaped(key), maps[key][1])
-            elif n.get('iconKey'):
-                drawn, why = n['iconKey'], 'its iconKey'
-            else:
-                drawn, why = default, 'default'
-            flag = '' if drawn in ids else ' ! no svg defines it: no icon'
+            drawn, why = icon_of(ns, n, maps)
+            flag = ''
+            if defined and drawn not in defined:
+                near = similar(drawn, icons)
+                flag = ' ! no svg file defines "%s": no icon%s' % (drawn, '; similar ids: ' + ', '.join(near) if near else '')
             print('  %-16s %-28s %-20s %s (%s)%s' % (n['id'], (n.get('label') or '')[:28], n.get('iconKey') or '-',
                                                   drawn, why, flag))
         if len(g['nodes']) > 300:
             print('  ... and %d more' % (len(g['nodes']) - 300))
-        print('  Another icon for one node: the line "%s.<node id> = <icon id>" in '
-              'opennms/etc/org.opennms.features.topology.app.icons.default.cfg' % escaped(ns))
+    print('  Another icon for one node: ./topo.sh view icon %s <node id> <icon id>' % name)
+    print('  (it writes the line "%s.<node id> = <icon id>" in opennms/etc/org.opennms.features.topology.app.icons.default.cfg)'
+          % escaped(graphs[0]['props'].get('namespace', '<namespace>') if graphs else '<namespace>'))
+    for message in stray_lines(graphs, maps, other_namespaces(etc_folder, name)):
+        print('  ! ' + message[1])
+    return 0
+
+
+def set_icon(path, cfg, svg_folder, node_id, icon_id):
+    """The line for one node in the icon mapping file cfg; icon_id --reset takes it out."""
+    root, graphs = read(path)
+    name = Path(path).stem
+    hits = [(g, n) for g in graphs for n in g['nodes'] if n['id'] == node_id]
+    if not hits:
+        ids = [n['id'] for g in graphs for n in g['nodes']]
+        print('  problem: the view %s has no node %s. Its node ids: %s%s' % (name, node_id, ', '.join(ids[:30]),
+                                                                          ', ...' if len(ids) > 30 else ''))
+        return 1
+    if len(hits) > 1:
+        print('  problem: node %s is in %d layers of the view %s: write the lines yourself (FILES.md, section 2)'
+              % (node_id, len(hits), name))
+        return 1
+    g, node = hits[0]
+    ns = g['props'].get('namespace')
+    if not ns:
+        print('  problem: the layer of node %s has no namespace, so OpenNMS does not load the view (./topo.sh view show %s)'
+              % (node_id, name))
+        return 1
+    reset = icon_id == '--reset'
+    defined = defined_ids(svg_folder)
+    if not reset and defined and icon_id not in defined:
+        near = similar(icon_id, icon_ids(svg_folder))
+        print('  problem: no svg file in opennms/ defines the icon "%s": the node would have no icon.%s' % (
+            icon_id, ' Similar ids: ' + ', '.join(near) + '.' if near else ''))
+        print('  ./topo.sh icons lists the icon ids.')
+        return 1
+    cfg = Path(cfg)
+    plain = '%s.%s' % (ns, node_id)
+    label = (node.get('label') or '').replace('\n', ' ').strip()
+    note = '# %s, node %s%s' % (name, node_id, ': ' + label if label else '')
+    before = icon_of(ns, node, load_maps(cfg.parent))[0]
+    lines = cfg.read_text(errors='replace').splitlines()
+    mine = [i for i, raw in enumerate(lines) if (split_property(raw) or (None,))[0] == plain]
+    if reset:
+        if not mine:
+            print('  Node %s of %s has no line in %s: nothing to take out.' % (node_id, name, cfg.name))
+            return 0
+        drop = set(mine) | {i - 1 for i in mine if i > 0 and lines[i - 1].strip() == note}
+        lines = [raw for i, raw in enumerate(lines) if i not in drop]
+    elif mine:
+        lines[mine[0]] = '%s = %s' % (escaped(plain), icon_id)
+        lines = [raw for i, raw in enumerate(lines) if i not in set(mine[1:])]
+    else:
+        lines += [note, '%s = %s' % (escaped(plain), icon_id)]
+    cfg.write_text('\n'.join(lines) + '\n')
+    after = icon_of(ns, node, load_maps(cfg.parent))[0]
+    print('  Node %s (%s) of the view %s: the icon %s -> %s' % (node_id, label or 'no label', name, before, after))
+    if not reset:
+        print('  %s: %s = %s' % (cfg, escaped(plain), icon_id))
+    for other in sorted(cfg.parent.glob('org.opennms.features.topology.app.icons.*.cfg')):
+        if other.name != cfg.name and plain in java_properties(other):
+            print('  ! %s has a line for this node too; OpenNMS may use that one' % other.name)
+    for rest, sentence in stray_lines(graphs, load_maps(cfg.parent), other_namespaces(cfg.parent, name)):
+        if rest == node_id and not reset:
+            print('  ! ' + sentence)
     return 0
 
 
@@ -211,6 +341,8 @@ if __name__ == '__main__':
             sys.exit(prepare(a[1], a[2], a[3]))
         if len(a) == 4 and a[0] == 'show':
             sys.exit(show(a[1], a[2], a[3]))
+        if len(a) == 6 and a[0] == 'icon':
+            sys.exit(set_icon(*a[1:]))
     except (ET.ParseError, ValueError, OSError) as e:
         print('  problem: %s' % e)
         sys.exit(1)
