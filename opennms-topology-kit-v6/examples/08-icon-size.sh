@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Example: bigger node icons
-# File: styles/topology.css, deployed inside jetty-webapps/opennms/svg/zz-topology-styles.<hash>.svg  (FILES.md, sections 6-7)
+# File: styles/topology.css, deployed as jetty-webapps/opennms/svg/zz-topology-styles.svg  (FILES.md, sections 6-7)
 # Look: icons are 72 px instead of 48 px, with their status frame, and the labels moved below them.
 # shellcheck source=tools/example-lib.sh
 source "$(dirname "$0")/../tools/example-lib.sh"

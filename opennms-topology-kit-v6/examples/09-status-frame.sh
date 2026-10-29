@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Example: the alarm frame and the labels
-# File: styles/topology.css, deployed inside jetty-webapps/opennms/svg/zz-topology-styles.<hash>.svg  (FILES.md, section 6)
+# File: styles/topology.css, deployed as jetty-webapps/opennms/svg/zz-topology-styles.svg  (FILES.md, section 6)
 # Look: the frame around an icon has your severity colours (nimbus-2 has a nodeDown alarm: red); labels are bigger, bold and dark blue.
 # shellcheck source=tools/example-lib.sh
 source "$(dirname "$0")/../tools/example-lib.sh"

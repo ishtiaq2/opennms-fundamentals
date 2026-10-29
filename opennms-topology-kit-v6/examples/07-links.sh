@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Example: link colours and width
-# File: styles/topology.css, deployed inside jetty-webapps/opennms/svg/zz-topology-styles.<hash>.svg  (FILES.md, section 6)
+# File: styles/topology.css, deployed as jetty-webapps/opennms/svg/zz-topology-styles.svg  (FILES.md, section 6)
 # Look: links are 5 px wide: green when up, red and dashed when down, blue when selected, orange under the mouse.
 # shellcheck source=tools/example-lib.sh
 source "$(dirname "$0")/../tools/example-lib.sh"

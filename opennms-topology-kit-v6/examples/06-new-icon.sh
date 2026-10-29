@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Example: a new icon file, for the Stratus nodes
 # File: opennms/jetty-webapps/opennms/svg/stratus.svg, plus a mapping and the Change Icon list  (FILES.md, sections 1-3)
-# Look: press Ctrl+Shift+R: stratus-1 and stratus-2 show the new icon in the Enhanced Linkd views.
+# Look: open the topology page in a new tab (a new svg file): stratus-1 and stratus-2 show the new icon in the Enhanced Linkd views.
 # shellcheck source=tools/example-lib.sh
 source "$(dirname "$0")/../tools/example-lib.sh"
 # examples/assets/stratus.svg is a placeholder with the structure OpenNMS needs: a group <id>_icon
