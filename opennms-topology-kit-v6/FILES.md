@@ -6,12 +6,12 @@ example (`./topo.sh example N`) that changes that file, so you can watch what ha
 
 | # | File | What it decides | A change shows | Examples |
 |---|---|---|---|---|
-| 1 | `jetty-webapps/opennms/svg/*.svg` | the icons: artwork, colours, normal / mouse-over / selected | on page reload (Ctrl+Shift+R for a file you replaced) | 05, 06 |
+| 1 | `jetty-webapps/opennms/svg/*.svg` | the icons: artwork, colours, normal / mouse-over / selected | a new file: in a new browser tab; a changed file: on reload with the browser cache off (section 6) | 05, 06 |
 | 2 | `etc/org.opennms.features.topology.app.icons.*.cfg` | which node gets which icon | within a second | 01, 02, 03 |
 | 3 | `etc/org.opennms.features.topology.app.icons.list` | the icons in right-click > Change Icon | when the dialog opens | 04 |
 | 4 | `etc/org.opennms.features.topology.app.cfg` | header, automatic refresh | after the topology app restarts itself (~10 s) | 10 |
 | 5 | `etc/graphml/<name>.xml` and its two `.cfg` files | an entry of the View menu: its nodes, links and icons | when its cfg file appears (a deploy takes it away for 5 s and back) | 11 |
-| 6 | stock stylesheet in the theme jar, overridden by `styles/topology.css` | colours and widths of links, alarm frames, labels | override: on page reload | 07, 08, 09 |
+| 6 | stock stylesheet in the theme jar, overridden by `styles/topology.css` | colours and widths of links, alarm frames, labels; the parts, frame and size of one icon | override: in a new tab after its first deploy, then on reload with the cache off | 07, 08, 09, 12 |
 | 7 | Java/GWT source, compiled into bundles under `system/` | how nodes and links are drawn, the 48 px icon size | after a Maven build and restart | (08 does it with CSS) |
 
 Files 1-5 and the override of 6 are hot: `./topo.sh deploy` copies them into the running container and
@@ -19,8 +19,10 @@ OpenNMS picks them up without a restart.
 
 ## 1. Icon files: `jetty-webapps/opennms/svg/*.svg`
 
-When a topology page opens, OpenNMS lists every `*.svg` in this folder (`IconRepositoryManager.getSVGIconFiles`).
-The browser fetches each one as `/opennms/svg/<file>` and puts it into the page's `<defs>` (`D3.injectSVGDef`).
+When a browser tab opens the topology page, OpenNMS lists every `*.svg` in this folder
+(`IconRepositoryManager.getSVGIconFiles`). The browser fetches each one as `/opennms/svg/<file>` and puts the whole
+file into the page's `<defs>` (`D3.injectSVGDef`). A reload of the tab keeps that list (section 6), so a new file
+reaches an open tab only through a new tab.
 File names do not matter; the ids inside do. An icon is four groups:
 
 ```xml
@@ -36,7 +38,9 @@ fade in. **Size:** OpenNMS measures the normal group and scales the icon so its 
 viewBox works. **Colour:** the colour lives in the file, as `fill="..."` or in a `<style>` block.
 `opennms_icons.svg` uses classes `.st0` to `.st16`: `#505154` is the normal grey, `#09A8D3` the blue of
 selected and mouse-over, `#FFFFFF` the white. All files end up in one page, so a class such as `.st1` in one
-file also colours every other file that uses `.st1`. Give your own icons their own class names, or inline fills.
+file also colours every other file that uses `.st1`. Give your own icons their own class names, or inline fills,
+or settle it in `styles/topology.css` with rules that start with the id of a drawing (section 6): `./topo.sh css`
+lists the classes that several files define differently.
 
 The stock files are:
 
@@ -44,8 +48,8 @@ The stock files are:
 - `atlas_icons.svg`, `vmware_icons.svg` and `legacy_icons.svg`
 
 Your production image adds `helix.svg`, `orion.svg` and `nimbus.svg`. `./topo.sh icons` lists every icon id
-and points out a file that lacks one of the four groups. When you replace a file under the same name, the
-browser can keep its cached copy: reload with Ctrl+Shift+R.
+and points out a file that lacks one of the four groups. The browser keeps svg files for an hour: after a change,
+reload with the cache off (section 6).
 
 - **Example 05** recolours the stock icons by changing two colours in `opennms_icons.svg`.
 - **Example 06** adds `stratus.svg`, a placeholder with the four groups (`examples/assets/stratus.svg`), maps the Stratus model to it and adds it to the Change Icon list.
@@ -206,10 +210,36 @@ That jar is an OSGi fragment of the Vaadin themes bundle, so a change means rebu
 It is not hot. `./topo.sh pull` copies the file to `reference/topo_default-styles.css` for reading.
 
 **Hot:** a `<style>` in any file of the svg folder applies to the whole topology page (section 1).
-`./topo.sh deploy` puts `styles/topology.css` there as `zz-topology-styles.<hash>.svg`. Its name changes
-with its content, so no browser shows an old copy. Start selectors with `svg` so they beat the stock rules:
-`svg path.edge.up` beats `.edge.up`. A selector also needs the classes of the stock rule: `svg path.edge` loses to
-`.edge.normal`.
+`./topo.sh deploy` puts `styles/topology.css` there as `zz-topology-styles.svg`. Start selectors with `svg` so they
+beat the stock rules: `svg path.edge.up` beats `.edge.up`. A selector also needs the classes of the stock rule:
+`svg path.edge` loses to `.edge.normal`.
+
+**When the browser shows a change.** Two things in OpenNMS decide it, for every svg file, this one included:
+
+- A browser tab gets the list of svg files when it opens the topology page, and keeps it on reload: `TopologyUI` is
+  `@PreserveOnRefresh`, so a reload finds the page's old state, the `TopologyComponent` with its list included
+  (`getState().setSVGDefFiles(...)` runs once, when the component is made). A new svg file reaches an open tab only
+  through a new tab. (Kit 3.6 and older named this file `zz-topology-styles.<hash>.svg`, a new name at each change,
+  so an open tab never got a change. Kit 3.7 keeps one name, and the next deploy removes the old ones.)
+- Jetty sends the files of the web application with `Cache-Control: max-age=3600,public` (`cacheControl` of the
+  `default` servlet in `jetty-webapps/opennms/WEB-INF/web.xml`), so the browser keeps an svg file for an hour.
+  Ctrl+Shift+R is not enough: the page asks for its svg files after it has loaded, and Chrome bypasses its cache
+  only for what a page asks for while it loads. Reload with DevTools (F12) open and Network > Disable cache ticked.
+
+`./topo.sh deploy` says after each deploy which of the two applies, and `./topo.sh css [dev|prod]` whether that
+OpenNMS has your current `styles/topology.css`. Dev always gets the file; production gets it with your first rules,
+and keeps it from then on, so that open tabs keep it in their list.
+
+**One icon.** Each svg file sits whole in the `<defs>` of the page; a node shows copies of one of its drawings
+(`<use href="#X">`). A rule whose selector holds the drawing's id styles a part of it in every copy, and wins over the
+class rules of every svg file, in any order: `#X .cls-1 { fill: #1F3A5F; }`, `#X_rollover ...`, `#X_active ...`.
+`./topo.sh css <icon id | file.svg>` prints these rules for one icon, made from its file. The nodes drawn with an
+icon are `svg .vertex:has(use.upIcon[*|href="#X"])`: their `rect.status` (frame: `stroke`, `stroke-width`, `rx`;
+background: `fill`), `.icon-container` (`scale`, `filter`, `shape-rendering`) and `text.vertex-label`. Lengths in rules
+for parts of a drawing are in its own units, which OpenNMS shrinks to 48 px; `vector-effect: non-scaling-stroke` keeps
+a stroke in screen pixels. CSS variables pass into the copies:
+`#X .cls-1 { fill: var(--alarm, #1F3A5F); }` with `svg .vertex:has(> rect.status.critical) { --alarm: #CC0000; }`.
+Step 7 of `GUIDE-Maven-abc-styles.md` has the details.
 
 What OpenNMS draws (`GWTVertex.java`, `GWTEdge.java`, `GraphPainter.java`):
 
@@ -245,6 +275,8 @@ severity or set `stroke`, `stroke-width`, `stroke-opacity` or `stroke-dasharray`
 - **Example 07** sets link colours, width and dashes.
 - **Example 08** changes the icon size: the CSS `scale` property multiplies the 48 px around the node's centre.
 - **Example 09** sets the alarm frame colours and the labels.
+- **Example 12** styles one icon (das_nimbus, or `ICON=<id> ./topo.sh example 12`): the main colour of each of its
+  drawings (the alarm colour with a major or critical alarm), a 2 px rounded frame on white, 25 % bigger, crisp edges.
 
 ## 7. Source code (read it; changing it needs a build)
 
@@ -257,7 +289,9 @@ Stock 33.1.8, at tag `opennms-33.1.8-1` of https://github.com/OpenNMS/opennms. Y
 | [`.../gwt/client/GWTEdge.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/gwt/client/GWTEdge.java) | the link path (a curve) and its inline 3px width |
 | [`.../gwt/client/d3/D3.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/gwt/client/d3/D3.java) | `injectSVGDef`: puts the svg files into the page |
 | [`.../internal/GraphPainter.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/GraphPainter.java) | the classes of nodes and links (`vertex selected`, `edge selected up`) |
-| [`.../support/IconRepositoryManager.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/support/IconRepositoryManager.java) | the svg folder and the icon lookup of section 2 |
+| [`.../support/IconRepositoryManager.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/support/IconRepositoryManager.java) | the svg folder (`getSVGIconFiles`) and the icon lookup of section 2 |
+| [`.../internal/TopologyUI.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/TopologyUI.java) | `@PreserveOnRefresh`: a reload keeps the page's state, its list of svg files included |
+| [`web.xml`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/opennms-webapp/src/main/webapp/WEB-INF/web.xml) | `cacheControl` `max-age=3600,public` of the `default` servlet: the browser keeps svg files for an hour |
 | [`DefaultIconRepository.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.api/src/main/java/org/opennms/features/topology/api/support/DefaultIconRepository.java) | reads and writes a mapping file |
 | [`LinkdEdgeStatusProvider.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/plugins/org.opennms.features.topology.plugins.topo.linkd/src/main/java/org/opennms/features/topology/plugins/topo/linkd/internal/LinkdEdgeStatusProvider.java) | links `up` / `down` |
 | [`Topology.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/enlinkd/service/api/src/main/java/org/opennms/netmgt/enlinkd/service/api/Topology.java) | `getIconKey`: the Enhanced Linkd icon keys |

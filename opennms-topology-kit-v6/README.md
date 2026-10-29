@@ -61,18 +61,22 @@ show has no such field, `./dev.sh up` gives dev's copy one and says so; producti
 ## 2. Learn, change, look
 
 ```bash
-./topo.sh example        # the eleven examples, one per file and effect (FILES.md has the details)
+./topo.sh example        # the twelve examples, one per file and effect (FILES.md has the details)
 ./topo.sh example 7      # apply one: it changes files in opennms/ or styles/ and deploys them to dev
 ./topo.sh diff           # everything you changed since the last pull or production deploy
 ./topo.sh revert         # drop your changes (or one file: ./topo.sh revert <file>)
 ./topo.sh watch          # deploy every save to dev, while you edit files in opennms/ and styles/
 ./topo.sh icons          # every icon id, and the icon each node gets (./topo.sh icons prod: production's nodes)
+./topo.sh css            # the svg files, their clashing style rules, and whether dev has styles/topology.css
+./topo.sh css <icon id>  # CSS for the parts of one icon (or <file.svg>), to copy into styles/topology.css
 ./topo.sh view           # the GraphML views: entries of the View menu (add, remove: FILES.md, section 5)
 ./topo.sh view show <name>                     # a view's namespace, node ids and the icon each node gets
 ./topo.sh view icon <name> <node id> <icon id> # another icon for one node of a view; --reset takes it back
 ```
 
-Reload the topology page after a deploy. After a replaced icon file, press Ctrl+Shift+R, so the browser drops its old copy.
+Reload the topology page after a deploy. Svg files, `styles/topology.css` included, need more (FILES.md, section 6): a
+new one reaches the page only in a new browser tab, and a changed one only with the browser cache off (F12 > Network >
+Disable cache), because OpenNMS lets the browser keep svg files for an hour. `./topo.sh deploy` says which applies.
 
 ## 3. Hot deploy to production
 
@@ -113,7 +117,7 @@ renames it `<date>-<time>.undone`; run it again to go one deploy further back. `
 | Folder | What it holds | Comes from |
 |---|---|---|
 | `opennms/` | the topology files you change: `etc/org.opennms.features.topology.app*.cfg`, `...icons.list`, GraphML views (`etc/graphml/*.xml` and their cfg files), `jetty-webapps/opennms/svg/*.svg` | production, `./topo.sh pull` |
-| `styles/topology.css` | your CSS for the topology page | the kit |
+| `styles/topology.css` | your CSS for the topology page; in OpenNMS it is `jetty-webapps/opennms/svg/zz-topology-styles.svg` | the kit |
 | `reference/topo_default-styles.css` | the stock stylesheet, for reading | production's theme jar, `./topo.sh pull` |
 | `.kit/baseline/` | production's version of the files in `opennms/` as of your last pull or deploy, for `./topo.sh diff`, `revert` and the deploy check | `./topo.sh pull`, `./topo.sh deploy prod` |
 | `.kit/overlays/opennms-overlay/` | production's `/opt/opennms-overlay` without `etc/`, and the dev-only login page if one was needed | production, `./dev.sh up` |
@@ -160,6 +164,7 @@ ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml  # 
 | `./topo.sh pull [prod\|dev]` | copy the topology files into `opennms/` (from production: also onto dev) |
 | `./topo.sh deploy dev\|prod [-y]`, `./topo.sh undo [-y]` | hot deploy; undo the last production deploy |
 | `./topo.sh watch`, `example [N]`, `diff`, `revert [file]`, `icons [dev\|prod]` | see section 2 |
+| `./topo.sh css [dev\|prod]`, `./topo.sh css <icon id \| file.svg>` | the svg files and their style rules, whether that OpenNMS has your CSS; CSS for the parts of one icon (FILES.md, section 6) |
 | `./topo.sh view [list [dev\|prod]]`, `view show <name> [dev\|prod]`, `view add <file> [name]`, `view remove <name> [dev\|prod]` | GraphML views (FILES.md, section 5) |
 | `./topo.sh view icon <name> <node id> <icon id \| --reset>` | another icon for one node of a view: the line `<namespace>.<node id> = <icon id>`, written for you, and deployed to dev |
 
@@ -191,6 +196,10 @@ ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml  # 
 - **A health check says "Bundle 81 is waiting for dependencies"**: a Karaf bundle of the image cannot start in dev, often
   one that needs production's other containers. To see which one and what it waits for: `ssh -p 8101 admin@localhost`
   (password admin), then `bundle:diag 81`. The topology page works without it.
+- **Your CSS (`styles/topology.css`) or a new icon does not show**: a browser tab keeps the list of svg files it got
+  when it opened the topology page, so open the page in a new tab after the first deploy of a new svg file; after a
+  change, reload with the browser cache off (F12 > Network > Disable cache). `./topo.sh css` says whether the OpenNMS
+  has your CSS (FILES.md, section 6).
 - **A GraphML view is not in the View menu**: `./topo.sh view list` shows whether its cfg file is there; reload the
   page. `./dev.sh logs` (karaf.log) names the error if OpenNMS could not read the file.
 - **The page is "unreachable" from your computer**: the firewall. Run

@@ -26,14 +26,13 @@ can:
 |---|---|---|---|
 | another icon for one node | `./topo.sh view icon Maven-abc <node id> <icon id>`: it writes a line in `opennms/etc/org.opennms.features.topology.app.icons.default.cfg` | that node in this view | 5 |
 | icon size, labels, links, alarm frames | `styles/topology.css` | the whole topology page: every view | 6 |
-| another look for one icon: a tint, grey, its labels | a rule in `styles/topology.css` that names the icon | every node drawn with that icon, in every view | 7 |
-| exact colours of an icon | its file in `opennms/jetty-webapps/opennms/svg/` | every node drawn with that icon, in every view | 7 |
+| the colours of the parts of one icon, its frame, background, size, sharpness, its labels | rules in `styles/topology.css` that name the icon: `./topo.sh css <icon id>` prints them | every node drawn with that icon, in every view; the svg file stays as it is | 7 |
 | labels, tooltips, layout or zoom level of the view | `opennms/etc/graphml/Maven-abc.xml` | this view, until production writes the file again | 8 |
 
 The CSS cannot pick out this one view: OpenNMS 33.1.8 draws every node as `<g class="vertex">` and every link as
 `<path class="edge ...">`, with nothing that names the view. (It ignores the GraphML `styleName` of a node and reads
 none for a link.) The page shows one view at a time, so the CSS changes what you see in Maven-abc, and in the other
-views too. It can pick out the nodes drawn with one icon (step 7).
+views too. It can pick out the nodes drawn with one icon, and the parts of one icon (step 7).
 
 ## 1. Set up the development machine (once)
 
@@ -49,18 +48,18 @@ Skip what you have done already.
    ssh maven-admin@192.168.0.36 podman ps     # lists the production containers: it works
    ```
 
-4. **The kit, version 3.6 or later** (it goes over version 3.5, 3.4, ... of the kit). Copy the update archive from the
+4. **The kit, version 3.7 or later** (it goes over version 3.6, 3.5, ... of the kit). Copy the update archive from the
    computer with the browser to the development machine, for example with
-   `scp opennms-topology-kit-v3.6-update.tar.gz admin@192.168.0.47:` on that computer. Then, on the development
+   `scp opennms-topology-kit-v3.7-update.tar.gz admin@192.168.0.47:` on that computer. Then, on the development
    machine, unpack it over the kit folder:
 
    ```bash
-   tar xzf ~/opennms-topology-kit-v3.6-update.tar.gz -C ~/opennms-fundamentals/opennms-fundamentals/opennms-topology-kit-v6
-   chmod +x dev.sh topo.sh   # only if "Permission denied"
+   tar xzf ~/opennms-topology-kit-v3.7-update.tar.gz -C ~/opennms-fundamentals/opennms-fundamentals/opennms-topology-kit-v6
+   chmod +x dev.sh topo.sh examples/*.sh   # only if "Permission denied"
    ```
 
    It replaces a few kit files and adds this guide. Your `opennms/`, `styles/`, `backups/` and `kit.env` stay as
-   they are. Check: `./topo.sh view icon` answers with a line that starts `usage: ./topo.sh view icon`.
+   they are. Check: `./topo.sh css` lists the svg files of `opennms/`.
 
 ## 2. Start the development OpenNMS
 
@@ -206,11 +205,45 @@ GraphML node it only works when a mapping file already holds the node's iconKey 
 
 ## 6. Page styles: icon size, labels, links, alarm frames
 
-Open `styles/topology.css`, add rules, save, and reload the page. The kit deploys this file as
-`svg/zz-topology-styles.<hash>.svg`, under a new name for each change, so the browser never shows an old copy. To win
-over a rule of the stock stylesheet (`reference/topo_default-styles.css`, for reading), start the selector with `svg`
-and name at least the classes that the stock rule names: the stock `.edge.normal` beats `svg path.edge`, but
-`svg path.edge.normal` beats `.edge.normal`.
+Put your rules into `styles/topology.css` and save; `watch` deploys them. The kit puts the file into OpenNMS as
+`jetty-webapps/opennms/svg/zz-topology-styles.svg`, a small svg file that holds your rules in a `<style>` block.
+OpenNMS puts every svg file of that folder into the topology page, so the rules apply there.
+
+### 6.1 Seeing a change: a new tab once, then the cache off
+
+Two things in OpenNMS decide when the browser shows a changed svg file, and your CSS is one:
+
+1. **A new svg file needs a new tab.** A browser tab reads the list of svg files when it opens the topology page,
+   and keeps that list when you reload it: OpenNMS keeps the state of the page between reloads (`@PreserveOnRefresh`
+   on `TopologyUI`). After the first deploy of `zz-topology-styles.svg` to dev, and after the first one to production,
+   open the topology page **in a new tab** (type or paste the address). Kit 3.6 gave this file a new name at every
+   change, so a tab that was already open never saw your rules: that is why this step did nothing for you. Kit 3.7
+   keeps one name.
+2. **A changed svg file needs the cache off.** OpenNMS sends svg files with `Cache-Control: max-age=3600`, so the
+   browser keeps each one for an hour. Ctrl+Shift+R is not enough: the page asks for its svg files after it has
+   loaded, and Chrome skips its cache only for what a page asks for while it loads. While you work on styles, open
+   the developer tools (F12), tick **Network > Disable cache**, keep the developer tools open and reload normally.
+   (With them open, right-click on the reload button > *Empty cache and hard reload* does it once.)
+
+After each deploy, `./topo.sh` tells you which one applies: "New there: ..." or "reload with the cache off".
+
+### 6.2 Check that your CSS is there
+
+```bash
+./topo.sh css            # the svg files, their clashing style rules, and whether dev has your styles/topology.css
+./topo.sh css prod       # the same for production
+```
+
+In the browser, http://192.168.0.47:8980/opennms/svg/zz-topology-styles.svg is an empty page whose source (Ctrl+U)
+shows your rules. On the topology page: F12 > Elements, Ctrl+F `zz-topology-styles`. The file sits in the `<defs>` of
+the map as `<svg width="0" height="0">` with your `<style>`. Select a node's `<use class="upIcon">`: the Styles pane
+lists the rules that apply to it.
+
+### 6.3 Rules for every node and link
+
+To win over a rule of the stock stylesheet (`reference/topo_default-styles.css`, for reading), start the selector
+with `svg` and name at least the classes that the stock rule names: the stock `.edge.normal` beats `svg path.edge`,
+but `svg path.edge.normal` beats `.edge.normal`.
 
 ```css
 /* Icons 72 px instead of 48 px, with their frame; labels below them */
@@ -231,50 +264,183 @@ svg .vertex > rect.status.major, svg .vertex > rect.status.critical { stroke: #C
 ```
 
 OpenNMS draws a link of a GraphML view as `<path class="edge normal">`: it never has the class `up` or `down` (Enhanced
-Linkd links do). Scripts in production's `/opt/opennms/etc/graphml-edge-status/` can give a link another severity
-(`edge major`, `edge critical`, ...) or set its `stroke`, `stroke-width`, `stroke-opacity` or `stroke-dasharray`
-directly; such a value wins over a CSS rule without `!important`. This lists them (no such folder: no scripts):
-
-```bash
-ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml-edge-status
-```
+Linkd links do). Scripts in `/opt/opennms/etc/graphml-edge-status/` could give a link another severity or set its
+stroke directly, but on your production that folder lists nothing (you checked:
+`ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml-edge-status`), so every link of
+Maven-abc is `edge normal` and the rules above reach all of them.
 
 Examples 07, 08 and 09 (`./topo.sh example`) show more rules, and FILES.md, section 6, lists the elements and classes
 OpenNMS draws.
 
-## 7. The look of one icon: a CSS rule, or its svg file
+## 7. The look of one icon, without changing its svg file
 
-OpenNMS draws the icon of a node as `<use class="upIcon" xlink:href="#<icon id>">`, so a CSS rule can pick the nodes
-drawn with one icon, in every view, and leave the svg files alone. Add rules like these to `styles/topology.css`, save
-(`watch` deploys them) and reload the page:
+### 7.1 What the page holds
 
-```css
-/* Every node drawn with das_helix: the icon tinted blue, and a blue label */
-svg .vertex use.upIcon[*|href="#das_helix"] { filter: sepia(1) saturate(5) hue-rotate(180deg); }
-svg .vertex:has(use.upIcon[*|href="#das_helix"]) > text.vertex-label { fill: #2E6AC7; }
+OpenNMS puts each svg file whole into the `<defs>` of the map, where nothing is drawn, and draws each node with
+copies of one drawing of it (`D3.injectSVGDef`, `GWTVertex`):
 
-/* Every node drawn with orion: in grey */
-svg .vertex use.upIcon[*|href="#orion"] { filter: grayscale(1); }
+```text
+<svg>                                                       the map
+  <defs>
+    <svg viewBox="0 0 478.53 140.57">                       an icon file, whole
+      <style> .cls-1 { fill: #d1d3d4; } ... </style>        applies to the whole page, not only to this file
+      <g id="das_nimbus"> <rect class="cls-1" .../> ...     one drawing; its id is the icon id
+    <svg width="0" height="0"> <style> ... </style>         zz-topology-styles.svg: your styles/topology.css
+  <g class="vertex">                                        one node drawn with das_nimbus
+    <rect class="status normal">                            its frame, and the background behind the drawing
+    <g class="icon-container" transform="... scale(0.1)">   the drawing, shrunk to 48 px
+      <use class="upIcon" xlink:href="#das_nimbus">         a copy of the drawing
+      <use class="overIcon" xlink:href="#das_nimbus_rollover">   over it while the mouse is on the node
+      <use class="activeIcon" xlink:href="#das_nimbus_active">   over it while the node is selected
+    <text class="vertex-label">home lab 1</text>
 ```
 
-`filter` changes the whole drawing of the icon: `sepia(1) saturate(5) hue-rotate(<angle>)` tints a grey icon (180deg
-blue, 70deg green, 320deg red), and there are `brightness()`, `grayscale()`, `opacity()` and `drop-shadow()`. It cannot
-set one exact colour of the drawing. `upIcon` is the icon as it normally shows; over it, OpenNMS shows `<id>_rollover`
-under the mouse (`use.overIcon`) and `<id>_active` when the node is selected (`use.activeIcon`). With step 5 a node can
-get an icon that no other node of the view has: the rules for that icon then style that one node.
+So there is no `svg.nimbus` element for each node. What you would write as `svg.nimbus` is one of two selectors:
 
-**Exact colours (optional; this edits the svg file).** The colours of an icon are in its file in the svg folder:
+| You mean | Selector | For |
+|---|---|---|
+| a part of the drawing, such as its `.cls-1` shapes | `#das_nimbus .cls-1` | `fill`, `stroke`, `opacity` of that part, in every node drawn with das_nimbus |
+| the whole node | `svg .vertex:has(use.upIcon[*\|href="#das_nimbus"])`, followed by `> rect.status`, `> .icon-container` or `> text.vertex-label` | frame, background, size, filters, label |
+
+The selectors name the icon id, not the file name: `./topo.sh icons` lists the ids of each file, and
+`./topo.sh view show Maven-abc` the icon of each node (nodes 11 and 14 have das_nimbus since step 5). `:has()` needs
+Chrome or Edge 105, or Firefox 121, or later.
+
+### 7.2 The colours of its parts
 
 ```bash
-grep -l 'id="das_helix_icon"' opennms/jetty-webapps/opennms/svg/*.svg                    # the file of das_helix
-grep -oiE '#[0-9a-f]{6}|#[0-9a-f]{3}\b' opennms/jetty-webapps/opennms/svg/<file>.svg | sort | uniq -c   # its colours
-sed -i 's/#505154/#1F3A5F/gI' opennms/jetty-webapps/opennms/svg/<file>.svg               # grey becomes dark blue
+./topo.sh css das_nimbus        # or the file: ./topo.sh css nimbus.svg
 ```
 
-The `sed` line changes every icon of that file, in its three versions (`<id>`, `<id>_rollover`, `<id>_active`). If the
-file colours its shapes through classes in a `<style>` block (`.st1 { fill: ... }`), those classes apply to the whole
-page, so other files that use `.st1` change too (FILES.md, section 1). After an svg change press **Ctrl+Shift+R** on the
-topology page: the browser keeps svg files in its cache, and a plain reload can show the old icon.
+This prints the rules of the file's `<style>` block (and its `fill="..."` attributes) for that icon only, one block
+for each drawing: as it normally shows, under the mouse (`_rollover`) and when selected (`_active`). For a file with
+the classes of the nimbus.svg you showed, it looks like this (shortened):
+
+```css
+/* das_nimbus as it normally shows: <use class="upIcon" xlink:href="#das_nimbus"> */
+#das_nimbus .cls-1 { fill: #d1d3d4; }
+#das_nimbus .cls-2 { fill: #bcbec0; }
+#das_nimbus .cls-3 { fill: #fff; }
+
+/* das_nimbus under the mouse: <use class="overIcon" xlink:href="#das_nimbus_rollover"> */
+#das_nimbus_rollover .rollover-cls-3 { fill: #249376; }
+#das_nimbus_rollover .rollover-cls-4 { fill: #3eb397; }
+```
+
+It also warns about a file that OpenNMS cannot draw as intended, for example a normal drawing that holds its
+`_rollover` and `_active` drawings (all three show at once), or a `_default` group (OpenNMS never draws one).
+
+Copy the lines you want into `styles/topology.css` and change the values. The same colours as in the file change
+nothing, so you can also append the whole output and edit there: `./topo.sh css das_nimbus >> styles/topology.css`.
+
+```css
+#das_nimbus .cls-1 { fill: #1F3A5F; }                     /* the body: dark blue */
+#das_nimbus .cls-2 { fill: #DCE6F2; }
+#das_nimbus_rollover .rollover-cls-3 { fill: #F28C28; }   /* orange under the mouse */
+#das_nimbus_active .active-cls-3 { fill: #F28C28; }       /* and when selected */
+```
+
+**Why the id in front.** The `<style>` block of every svg file applies to the whole page. Files exported from
+Illustrator all call their classes `.cls-1`, `.cls-2`, ..., so the `.cls-1` rule of the file that the browser loads
+last colours the `.cls-1` parts of every icon, and that order can change from one page load to the next.
+`#das_nimbus .cls-1` holds an id, so it wins over every `.cls-1` rule in any order, and touches no other icon.
+`./topo.sh css` (without a file) lists the class rules that your svg files define differently.
+
+The svg file itself stays as it is. An svg file you changed, such as nimbus.svg with your version of example 05, goes
+back to production's version with `./topo.sh revert opennms/jetty-webapps/opennms/svg/nimbus.svg`.
+
+### 7.3 Frame, background, size and edges: "svg.nimbus { border: 2px solid }"
+
+An SVG drawing has no CSS box, so `border`, `background` and `padding` do nothing on it. The frame that OpenNMS draws
+around each node, `rect.status`, does that job: its `stroke` is the border, and its `fill` is the background behind
+the transparent parts of the drawing. OpenNMS paints both in the alarm colour; that is the green you see in dev.
+
+```css
+/* "border: 2px solid" with round corners, and a white background */
+svg .vertex:has(use.upIcon[*|href="#das_nimbus"]) > rect.status {
+  stroke-width: 2px;   /* the border; OpenNMS draws 5 px. Its colour stays the alarm colour */
+  rx: 4px;             /* round corners */
+  fill: #FFFFFF;       /* the background */
+}
+/* More for the same rule: stroke: #1F3A5F (one colour instead of the alarm colour), stroke-dasharray: 4 2 (dashed),
+   filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .4)) (a shadow under the frame) */
+
+/* 25 % bigger, with its frame and mouse target; the label moves down */
+svg .vertex:has(use.upIcon[*|href="#das_nimbus"]) > :is(.icon-container, rect.status, rect.svgIconOverlay) { scale: 1.25; }
+svg .vertex:has(use.upIcon[*|href="#das_nimbus"]) > text.vertex-label { translate: 0 6px; font-weight: bold; fill: #1F3A5F; }
+
+/* "sharpness": edges without smoothing, stronger colours */
+svg .vertex:has(use.upIcon[*|href="#das_nimbus"]) > .icon-container { shape-rendering: crispEdges; filter: contrast(1.3) saturate(1.2); }
+
+/* a 1 px line around every part of the drawing */
+#das_nimbus :is(path, rect, circle, ellipse, polygon, polyline, line) { stroke: #1F3A5F; stroke-width: 1px; vector-effect: non-scaling-stroke; }
+```
+
+**Sharpness.** CSS has no sharpness property, and a drawing is sharp at any size. Nimbus looks soft because OpenNMS
+shrinks its 478 x 141 units to 48 x 14 px. A bigger `scale` shows more of it. `shape-rendering: crispEdges` turns
+off the smoothing of edges: straight edges get crisp, curves get small steps (`geometricPrecision` is the opposite).
+`filter: contrast()` and `saturate()` make colours stronger. A bitmap inside an svg file (`<image>`) stays as sharp
+as it is; `./topo.sh css` says when a file holds one.
+
+**Units.** Lengths in rules for parts of the drawing (`#das_nimbus ...`), and the lengths of a filter on
+`.icon-container`, are in units of the drawing, which OpenNMS shrinks with it: for nimbus about 10 units make 1 px.
+`vector-effect: non-scaling-stroke` keeps a stroke in screen pixels. The frame and the label are in screen pixels.
+
+**A frame in a view without alarm colours** (`status none` in `./topo.sh view show`): OpenNMS hides the frame there;
+add `opacity: 1; stroke: #1F3A5F;` to the `rect.status` rule.
+
+### 7.4 The alarm colour inside the drawing
+
+A CSS variable passes into the copies of a drawing, so a part can take the colour of the node's alarm:
+
+```css
+#das_nimbus .cls-1 { fill: var(--alarm, #1F3A5F); }       /* dark blue, or the alarm colour set below */
+svg .vertex:has(> rect.status.major) { --alarm: #FF3300; }
+svg .vertex:has(> rect.status.critical) { --alarm: #CC0000; }
+```
+
+In dev every node of Maven-abc is `normal` (step 4). The demo view, View > DAS demo (GraphML), has a node with a
+nodeDown alarm (nimbus-2).
+
+### 7.5 Example 12 does all of this on one of your icons
+
+```bash
+./topo.sh example 12                    # das_nimbus, or the first icon whose id holds "nimbus"
+ICON=das_helix ./topo.sh example 12     # another icon
+```
+
+It finds the colour that most parts of each drawing have and writes rules for that icon into `styles/topology.css`,
+between `/* example: one icon: <icon id> */` and `/* end: one icon: <icon id> */`. Delete those lines to take it out.
+
+### 7.6 Where each piece is, to check it by hand
+
+| What | This machine | In OpenNMS (the container) | In the browser |
+|---|---|---|---|
+| your CSS | `styles/topology.css` | `/opt/opennms/jetty-webapps/opennms/svg/zz-topology-styles.svg` | http://192.168.0.47:8980/opennms/svg/zz-topology-styles.svg |
+| an icon file | `opennms/jetty-webapps/opennms/svg/nimbus.svg` | `/opt/opennms/jetty-webapps/opennms/svg/nimbus.svg` | http://192.168.0.47:8980/opennms/svg/nimbus.svg |
+| the stock stylesheet | `reference/topo_default-styles.css`, a copy | `VAADIN/themes/topo_default/styles.css` inside the theme jar that the first lines of the copy name | F12 > Sources |
+| how long the browser keeps svg files | | `cacheControl` in `/opt/opennms/jetty-webapps/opennms/WEB-INF/web.xml` | F12 > Network > the file > Headers |
+
+```bash
+podman exec onms-dev-core cat /opt/opennms/jetty-webapps/opennms/svg/zz-topology-styles.svg     # dev
+ssh maven-admin@192.168.0.36 podman exec opennms cat /opt/opennms/jetty-webapps/opennms/svg/zz-topology-styles.svg
+curl -sI http://192.168.0.47:8980/opennms/svg/nimbus.svg | grep -i cache-control   # max-age=3600: one hour
+```
+
+To see the copy of a drawing inside a `<use>` in F12 > Elements: Settings (the gear) > Preferences > Elements >
+*Show user agent shadow DOM*.
+
+The OpenNMS source behind this, at tag `opennms-33.1.8-1` (your image is built from your own repository, which may
+differ):
+
+| File | What it does |
+|---|---|
+| [`IconRepositoryManager.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/support/IconRepositoryManager.java) | `getSVGIconFiles`: the list of svg files, made when a tab opens the page |
+| [`TopologyUI.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/TopologyUI.java) | `@PreserveOnRefresh`: a reload keeps the page's state, that list included |
+| [`D3.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/gwt/client/d3/D3.java) | `injectSVGDef`: each file, whole, into `<defs>` |
+| [`GWTVertex.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/gwt/client/GWTVertex.java) | the elements of a node, and the scale to 48 px |
+| [`styles.css`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/themes/default-theme/src/main/filtered/VAADIN/themes/topo_default/styles.css) | the stock rules: frames and links in the alarm colours |
+| [`web.xml`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/opennms-webapp/src/main/webapp/WEB-INF/web.xml) | `cacheControl` `max-age=3600,public` for files such as the svg files |
 
 ## 8. Change the view file itself (only if you must)
 
@@ -321,7 +487,9 @@ the properties of a GraphML view.
      Maven-abc.xml again. These files stay as production has them; your other changes go.
    - *"You and production both changed these files after your last pull or deploy, so they are held back"*: compare them
      (`./topo.sh view show Maven-abc prod` for the view); `FORCE=1 ./topo.sh deploy prod` sends yours anyway.
-4. Open **http://192.168.0.36:8980/opennms/topology**, choose the view in the View menu and press **Ctrl+Shift+R** once.
+4. Open **http://192.168.0.36:8980/opennms/topology** in a new tab and choose the view in the View menu. A new tab
+   matters the first time `zz-topology-styles.svg` (or another new svg file) goes to production; after that, reload
+   with the cache off (step 6.1). Other people see a changed svg file within an hour.
 5. If something is wrong: `./topo.sh undo` puts back what the last deploy replaced and removes what it added. Run it
    again to go one deploy further back.
 6. To start from production's files again, for example after its software wrote Maven-abc.xml: `./topo.sh pull`
@@ -335,8 +503,10 @@ the properties of a GraphML view.
 | a node with the generic icon | it has no iconKey and no mapping line | a mapping line (step 5) |
 | a mapping line does nothing | its namespace is not the view's (for example the one of an example), a colon without a backslash, or another node id | `./topo.sh view show Maven-abc` names such a line ("does nothing: the namespace of this view is ..."); delete it and use `./topo.sh view icon` |
 | the icon of a node does not change after a mapping line | the line is not the one for this node, or the page was not reloaded | `./topo.sh view show Maven-abc`: the row of the node must say `(the line Maven-abc.<id> in ...)`; then reload the page |
-| an svg change does not show | the browser's cache | Ctrl+Shift+R |
-| a CSS rule does nothing | a stock rule with more classes wins | name the classes of the stock rule, after `svg` (step 6); the browser's developer tools (F12) show which rule wins |
+| no rule of `styles/topology.css` does anything | the tab opened the page before `zz-topology-styles.svg` was there, and a reload keeps its list of svg files | open the page in a new tab (step 6.1); `./topo.sh css` says whether the file is there |
+| a change of `styles/topology.css` or of an svg file does not show | the browser keeps svg files for an hour | reload with F12 > Network > Disable cache (step 6.1) |
+| a CSS rule does nothing | a stock rule with more classes wins, or a rule for a part of a drawing does not name its id | name the classes of the stock rule, after `svg` (step 6.3); start a rule for a part with the drawing's id (`./topo.sh css <icon id>`, step 7.2); F12 shows which rule wins |
+| an icon shows colours of another icon file | both files define `.cls-1` (or another class) differently, and the one loaded last wins | `./topo.sh css` lists such classes; rules with the id in front settle it (step 7.2) |
 | the view is not in the View menu | its cfg file is missing, or it is being loaded anew (5 seconds) | `./topo.sh view list`; reload the page; `./dev.sh logs` names errors in the file |
 | every frame is green in dev | the view's nodes and their alarms are in production's database only | look at alarm colours in View > DAS demo (GraphML) or on production |
 | a production deploy skipped Maven-abc.xml | production wrote the file after your last pull or deploy | `./topo.sh pull`, then change it again if you still need to |
@@ -351,6 +521,9 @@ the properties of a GraphML view.
 | `./topo.sh view list [prod]`, `./topo.sh view show Maven-abc [prod]` | the GraphML views; the nodes of one view and their icons |
 | `./topo.sh view icon Maven-abc <node id> <icon id>` | another icon for one node (`--reset` instead of the icon id: back to the view file's) |
 | `./topo.sh icons` | every icon id, by svg file, and the icon each node gets |
+| `./topo.sh css`, `./topo.sh css prod` | the svg files, clashing style rules, and whether that OpenNMS has your styles |
+| `./topo.sh css <icon id or file.svg>` | CSS for the parts of one icon, to copy into `styles/topology.css` |
+| `./topo.sh example 12` | one icon styled with CSS: colours, frame, background, size, edges |
 | `./topo.sh watch` | deploy every save to dev |
 | `./topo.sh diff`, `./topo.sh revert [file]` | what production does not have yet (since the last pull or deploy); drop it |
 | `./topo.sh deploy prod`, `./topo.sh undo` | hot deploy to production; take the last deploy back |

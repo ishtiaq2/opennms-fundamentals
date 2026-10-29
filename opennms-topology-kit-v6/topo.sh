@@ -11,6 +11,8 @@
 #   ./topo.sh diff                  your changes since the last pull or production deploy
 #   ./topo.sh revert [file]         drop those changes (all, or one file), and deploy to dev
 #   ./topo.sh icons [dev|prod]      the icons in the svg files, and the icon each node gets
+#   ./topo.sh css [dev|prod]        the svg files, style rules that clash, and whether styles/topology.css is there
+#   ./topo.sh css <file.svg | icon id>  CSS for the parts of one icon, to copy into styles/topology.css
 #   ./topo.sh view [list [dev|prod]]          the GraphML views there: entries of the View menu
 #   ./topo.sh view show <name> [dev|prod]     a view's nodes: id, label, icon key, the icon drawn
 #   ./topo.sh view icon <name> <node id> <icon id>   another icon for one node of a view (--reset: the view's own)
@@ -22,7 +24,8 @@ WS=opennms                                       # the workspace: same paths as 
 BASE=.kit/baseline                               # production's files as of the last pull or deploy: diff, revert, deploy
 SVG_DIR=jetty-webapps/opennms/svg
 STYLE_CSS=styles/topology.css                    # your CSS for the topology page reaches it in
-STYLE_PREFIX=zz-topology-styles                  # $SVG_DIR/zz-topology-styles.<hash>.svg (FILES.md, section 6)
+STYLE_PREFIX=zz-topology-styles                  # kit 3.6 and older: $SVG_DIR/zz-topology-styles.<hash>.svg
+STYLE_SVG=$SVG_DIR/$STYLE_PREFIX.svg             # styles/topology.css in the page, always this name (FILES.md, section 6)
 THEME_DIR=system/org/opennms/features/topology/themes/org.opennms.features.topology.themes.default-theme
 VIEW_CFG=etc/org.opennms.features.topology.plugins.topo.graphml # -<name>.cfg puts etc/graphml/<name>.xml in the View menu
 GRAPH_CFG=etc/org.opennms.netmgt.graph.provider.graphml         # -<name>.cfg: the same view for rest/api/v2/graphs
@@ -59,7 +62,7 @@ base_put() { # base_put <folder with the files> <file>...: production has these 
   shift
   [ -d "$BASE" ] || return 0
   for f in "$@"; do
-    case $f in "$SVG_DIR/$STYLE_PREFIX".*.svg) continue ;; esac # made from styles/topology.css: not a pulled file
+    case $f in "$SVG_DIR/$STYLE_PREFIX"*.svg) continue ;; esac # made from styles/topology.css: not a pulled file
     [ -f "$WS/$f" ] || [ -f "$BASE/$f" ] || continue
     mkdir -p "$BASE/${f%/*}"
     cp -a "$from/$f" "$BASE/$f"
@@ -67,8 +70,10 @@ base_put() { # base_put <folder with the files> <file>...: production has these 
 }
 base_drop() { local f; for f in "$@"; do rm -f "$BASE/$f"; done; } # production does not have these files now
 confirm() { [ "$1" = 1 ] || { read -rp "Go ahead? [y/N] " answer && [[ $answer == [yY] ]]; } || exit 1; }
+there() { awk -v f="$1" '$1 != "-" && $2 == f { found = 1 } END { exit !found }' <<<"$remote"; } # in deploy(): the container has it
 
 # The CSS file inside an SVG: OpenNMS puts every svg of the folder into the topology page.
+css_body() { python3 -c 'import re, sys; sys.stdout.write(re.sub(r"\A\s*/\*.*?\*/[ \t]*\n?", "", open(sys.argv[1]).read(), flags=re.S))' "$1"; }
 has_rules() { [ -f "$STYLE_CSS" ] && python3 -c 'import re, sys; sys.exit(0 if re.sub(r"/\*.*?\*/", "", open(sys.argv[1]).read(), flags=re.S).strip() else 1)' "$STYLE_CSS"; }
 style_svg() {
   printf '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"><!-- Made by topo.sh from %s. -->\n<style><![CDATA[\n' "$STYLE_CSS"
@@ -177,7 +182,7 @@ Deploy them, or ./topo.sh revert, or drop them: FORCE=1 ./topo.sh pull $from"
   mapfile -t files < <(tp "$from" exec "$c" sh -c 'cd "$1" && ls -1 etc/org.opennms.features.topology.app*.cfg etc/org.opennms.features.topology.app.icons.list 2>/dev/null' sh "$home")
   for f in "${files[@]}"; do tp "$from" cp "$c:$home/$f" - | tar -xf - -C "$TMP/ws/etc"; done
   tp "$from" cp "$c:$home/$SVG_DIR" - | tar -xf - -C "$TMP/ws/jetty-webapps/opennms"
-  rm -f "$TMP/ws/$SVG_DIR/$STYLE_PREFIX".*.svg # made from styles/topology.css
+  rm -f "$TMP/ws/$SVG_DIR/$STYLE_PREFIX"*.svg # made from styles/topology.css
   # GraphML views: their files and cfg files. The demo view of ./dev.sh stays out.
   # shellcheck disable=SC2016 # runs in the container
   mapfile -t files < <(tp "$from" exec "$c" sh -c 'cd "$1" && ls -1 etc/graphml/*.xml etc/org.opennms.features.topology.plugins.topo.graphml-*.cfg etc/org.opennms.netmgt.graph.provider.graphml-*.cfg 2>/dev/null; true' sh "$home" |
@@ -207,7 +212,7 @@ sys.stdout.write(zipfile.ZipFile(sys.argv[1]).read("VAADIN/themes/topo_default/s
 }
 
 deploy() {
-  local to=${1:-} yes=0 quiet=0 a c home stage remote f v sum base_sum style='' ts bk ovl_mounts='' plan files=() changed=() stale=() ovl_plan=() names=() reload=() mine=() theirs=() both=()
+  local to=${1:-} yes=0 quiet=0 a c home stage remote f v sum base_sum style='' ts bk ovl_mounts='' plan files=() changed=() stale=() ovl_plan=() names=() reload=() mine=() theirs=() both=() svg_new=() svg_old=()
   case $to in dev | prod) ;; *) die "usage: ./topo.sh deploy dev|prod [-y]" ;; esac
   shift
   for a in "$@"; do case $a in -y) yes=1 ;; -q) quiet=1 ;; esac; done
@@ -217,17 +222,19 @@ deploy() {
   home=$(home_of "$to")
   stage=$(mktemp -d -p "$TMP")
   cp -a "$WS/." "$stage/"
-  rm -f "$stage/$SVG_DIR/$STYLE_PREFIX".*.svg
-  if has_rules; then # the name changes with the content: no browser shows a cached old version
-    style_svg >"$stage/style.svg"
-    style="$SVG_DIR/$STYLE_PREFIX.$(md5sum <"$stage/style.svg" | cut -c1-10).svg"
-    mv "$stage/style.svg" "$stage/$style"
-  fi
+  rm -f "$stage/$SVG_DIR/$STYLE_PREFIX"*.svg
+  # styles/topology.css reaches the page as $STYLE_SVG, always under that name: an open topology page keeps the list of
+  # svg files it had when it opened, also on reload (FILES.md, section 6). Dev always has the file; production gets it
+  # with the first rules and keeps it from then on, without rules if you take them all out.
+  if has_rules || [ "$to" = dev ]; then style_svg >"$stage/$STYLE_SVG" && style=$STYLE_SVG; fi
   mapfile -t files < <(cd "$stage" && find . -type f | sed 's|^\./||' | sort)
-  # What the container has: "<md5>  <file>" for these files, "- <file>" for each style file.
+  # What the container has: "<md5>  <file>" for these files and the style file, "- <file>" for each style file.
   # shellcheck disable=SC2016 # runs in the container
-  remote=$(tp "$to" exec "$c" sh -c 'cd "$1" && shift && md5sum "$@" 2>/dev/null; ls -1 "$0".*.svg 2>/dev/null | sed "s/^/- /"; true' \
-    "$SVG_DIR/$STYLE_PREFIX" "$home" "${files[@]}")
+  remote=$(tp "$to" exec "$c" sh -c 'cd "$1" && shift && md5sum "$@" 2>/dev/null; ls -1 "$0"*.svg 2>/dev/null | sed "s/^/- /"; true' \
+    "$SVG_DIR/$STYLE_PREFIX" "$home" "${files[@]}" "$STYLE_SVG")
+  if [ -z "$style" ] && there "$STYLE_SVG"; then # keep it: open pages list it
+    style_svg >"$stage/$STYLE_SVG" && style=$STYLE_SVG && files+=("$STYLE_SVG")
+  fi
   for f in "${files[@]}"; do
     sum=$(cd "$stage" && md5sum "$f" | cut -d' ' -f1)
     [ "$(awk -v f="$f" '$1 != "-" && $2 == f { print $1; exit }' <<<"$remote")" = "$sum" ] || changed+=("$f")
@@ -256,6 +263,9 @@ deploy() {
       printf '  %s\n' "${both[@]}" >&2
     fi
   fi
+  for f in "${changed[@]}"; do # a new svg file reaches an open page only in a new tab; a changed one, past the cache
+    case $f in "$SVG_DIR"/*.svg) if there "$f"; then svg_old+=("${f##*/}"); else svg_new+=("${f##*/}"); fi ;; esac
+  done
   if [ ${#changed[@]} -eq 0 ] && [ ${#stale[@]} -eq 0 ]; then
     if [ ${#theirs[@]} -gt 0 ] || [ ${#both[@]} -gt 0 ]; then say "Nothing else to deploy."
     elif [ "$quiet" != 1 ]; then say "Nothing to deploy: $(name_of "$to") has these files already."; fi
@@ -316,7 +326,17 @@ deploy() {
   if [ "$to" = prod ]; then base_put "$stage" "${changed[@]}"; fi # production has them now: the baseline follows
   printf '%s deployed to %s: %s\n' "$(date +%T)" "$(name_of "$to")" "${changed[*]}${stale[*]:+ (removed ${stale[*]})}"
   [ ${#reload[@]} -eq 0 ] || say "  GraphML views loaded anew: ${reload[*]}"
-  [ "$quiet" = 1 ] || say "Reload the topology page. After a changed icon .svg press Ctrl+Shift+R: the browser may keep its old copy."
+  if [ ${#svg_new[@]} -gt 0 ]; then
+    say "  New there: ${svg_new[*]}. Open the topology page in a new browser tab: a tab reads the list of svg files"
+    say "  when it opens the page and keeps it on reload, so an open tab never loads a new svg file (FILES.md, section 6)."
+  fi
+  if [ ${#svg_old[@]} -gt 0 ] && [ "$quiet" = 1 ]; then
+    say "  (reload with the browser cache off: F12 > Network > Disable cache; svg files stay cached for an hour)"
+  elif [ ${#svg_old[@]} -gt 0 ]; then
+    say "Reload the topology page with the browser cache off: open DevTools (F12) > Network, tick Disable cache, keep"
+    say "DevTools open. The browser keeps svg files for an hour, and Ctrl+Shift+R does not load them again."
+  fi
+  [ "$quiet" = 1 ] || [ ${#svg_old[@]} -gt 0 ] || [ ${#svg_new[@]} -gt 0 ] || say "Reload the topology page."
 }
 
 undo() {
@@ -537,6 +557,37 @@ view() {
   esac
 }
 
+# ./topo.sh css [dev|prod]: the svg files and their style rules, and whether that OpenNMS has styles/topology.css.
+css_status() {
+  local to=$1 c home url n there_now mine sum old
+  [ -d "$WS" ] || die "./topo.sh pull first."
+  python3 tools/svgcss.py overview "$WS/$SVG_DIR"
+  n=$(python3 tools/svgcss.py count "$STYLE_CSS")
+  say ""
+  say "$STYLE_CSS has $n rule(s). The topology page gets them from $STYLE_SVG:"
+  if [ "$to" = prod ]; then url=$PROD_URL; else url="http://$(host_address):$DEV_PORT/opennms"; fi
+  if [ "$to" = dev ] && ! running "$DEV_CONTAINER"; then
+    say "  the development OpenNMS is not running (./dev.sh up)."
+    return 0
+  fi
+  check_target "$to"
+  c=$(container_of "$to")
+  home=$(home_of "$to")
+  # shellcheck disable=SC2016 # runs in the container
+  there_now=$(tp "$to" exec "$c" sh -c 'cd "$1" && md5sum "$2" 2>/dev/null; ls -1 "$3"*.svg 2>/dev/null; true' sh "$home" "$STYLE_SVG" "$SVG_DIR/$STYLE_PREFIX")
+  sum=$(awk 'NF == 2 { print $1; exit }' <<<"$there_now")
+  mine=$(style_svg | md5sum | cut -c1-32)
+  if [ -z "$sum" ]; then say "  $(name_of "$to") does not have it yet: ./topo.sh deploy $to"
+  elif [ "$sum" = "$mine" ]; then say "  $(name_of "$to") has it, as in $STYLE_CSS: $url/svg/${STYLE_SVG##*/}"
+  else say "  $(name_of "$to") has an older version: ./topo.sh deploy $to"; fi
+  old=$(grep -v -x -e "$STYLE_SVG" -e '' <<<"$(awk 'NF == 1' <<<"$there_now")" | sed 's|.*/||' | tr '\n' ' ' || true)
+  [ -z "$old" ] || say "  It also has $old(the hashed names of kit 3.6 and older): the next ./topo.sh deploy $to removes them."
+  say "To see it: a browser tab keeps the list of svg files it got when it opened the topology page, so after the first"
+  say "deploy of ${STYLE_SVG##*/} open the page in a new tab once. The browser keeps svg files for an hour (OpenNMS"
+  say "sends Cache-Control: max-age=3600) and Ctrl+Shift+R is not enough: reload with DevTools (F12) open and Network >"
+  say "Disable cache ticked. FILES.md, section 6, and step 6 of GUIDE-Maven-abc-styles.md say more."
+}
+
 revert() {
   local f v gone=()
   if [ -z "${1:-}" ]; then # views added since the pull leave dev too
@@ -566,7 +617,19 @@ case ${1:-} in
   example) example "${2:-}" ;;
   diff)
     diff -ru "$BASE" "$WS" || true
-    diff -u tools/topology.css.template "$STYLE_CSS" || true
+    # styles/topology.css against the kit's template, without the comment at the top (it changes between kit versions)
+    if [ -f "$STYLE_CSS" ]; then
+      diff -u --label "$STYLE_CSS (the kit's template)" --label "$STYLE_CSS" <(css_body tools/topology.css.template) <(css_body "$STYLE_CSS") || true
+    fi
+    ;;
+  css)
+    case ${2:-dev} in
+      dev | prod) css_status "${2:-dev}" ;;
+      *)
+        [ -d "$WS" ] || die "./topo.sh pull first."
+        python3 tools/svgcss.py rules "$WS/$SVG_DIR" "$2" "http://$(host_address):$DEV_PORT/opennms" "$PROD_URL"
+        ;;
+    esac
     ;;
   revert) revert "${2:-}" ;;
   view) view "${@:2}" ;;
@@ -578,7 +641,7 @@ case ${1:-} in
     esac
     ;;
   *)
-    sed -n '2,18p' "$0"
+    sed -n '2,20p' "$0"
     exit 2
     ;;
 esac
