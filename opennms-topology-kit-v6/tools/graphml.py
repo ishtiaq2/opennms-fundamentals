@@ -10,6 +10,10 @@
   graphml.py prepare <in> <out> <svg folder>
       copies <in> to <out>, with @orion@, @helix@, ... (any @word@) replaced by the icon id of that word in the svg
       folder: the same id, else an id that contains the word
+  graphml.py show <file> <svg folder> <etc folder>
+      the layers and nodes of a view: node id, label, icon key, the icon OpenNMS draws (a "<namespace>.<node id>"
+      line in an icon mapping file of <etc folder> wins over the icon key: IconRepositoryManager.getSVGIconId),
+      and the key to write for a node of your own choice
 """
 import re
 import sys
@@ -44,7 +48,7 @@ def read(path):
     graphs = []
     for graph in root.findall(NS + 'graph'):
         props = properties(root, graph, 'graph')
-        nodes = [properties(root, n, 'node') for n in graph.findall(NS + 'node')]
+        nodes = [dict(properties(root, n, 'node'), id=n.get('id')) for n in graph.findall(NS + 'node')]
         graphs.append({'id': graph.get('id'), 'props': props, 'nodes': nodes, 'edges': len(graph.findall(NS + 'edge'))})
     return root, graphs
 
@@ -120,6 +124,63 @@ def check(path, svg_folder, others):
     return 1 if problems else 0
 
 
+def java_properties(path):
+    """java.util.Properties, enough for icon mappings: # and ! comments, '=' ':' or blanks after the key, \\ escapes."""
+    out = {}
+    for raw in Path(path).read_text(errors='replace').splitlines():
+        line = raw.lstrip()
+        if not line or line[0] in '#!':
+            continue
+        key, i = '', 0
+        while i < len(line) and line[i] not in '=: \t\f':
+            if line[i] == '\\' and i + 1 < len(line):
+                i += 1
+            key += line[i]
+            i += 1
+        value = line[i:].lstrip(' \t\f')
+        if value[:1] in ('=', ':'):
+            value = value[1:]
+        out[key] = value.strip()
+    return out
+
+
+def escaped(key):
+    """A key as a mapping file must spell it: a colon, an equals sign or a blank needs a backslash."""
+    return re.sub(r'([\\:= ])', r'\\\1', key)
+
+
+def show(path, svg_folder, etc_folder):
+    root, graphs = read(path)
+    ids, maps = icon_ids(svg_folder), {}
+    for f in sorted(Path(etc_folder).glob('org.opennms.features.topology.app.icons.*.cfg')):
+        for k, v in java_properties(f).items():
+            maps.setdefault(k, (v, f.name))
+    default = maps.get('default', ('generic', ''))[0]
+    print('View menu label: %s' % (properties(root, root, 'graphml').get('label') or '(none: the name of the view)'))
+    for g in graphs:
+        p, ns = g['props'], g['props'].get('namespace', '?')
+        print('Layer "%s": namespace %s; %d nodes, %d links; layout %s, focus %s, zoom level %s, status %s' % (
+            p.get('label') or g['id'], ns, len(g['nodes']), g['edges'], p.get('preferred-layout', 'D3 Layout'),
+            p.get('focus-strategy', 'FIRST'), p.get('semantic-zoom-level', '1'), p.get('vertex-status-provider', 'none')))
+        print('  %-16s %-28s %-20s %s' % ('node id', 'label', 'iconKey', 'icon drawn'))
+        for n in g['nodes'][:300]:
+            key = '%s.%s' % (ns, n['id'])
+            if key in maps:
+                drawn, why = maps[key][0], 'the line %s in %s' % (escaped(key), maps[key][1])
+            elif n.get('iconKey'):
+                drawn, why = n['iconKey'], 'its iconKey'
+            else:
+                drawn, why = default, 'default'
+            flag = '' if drawn in ids else ' ! no svg defines it: no icon'
+            print('  %-16s %-28s %-20s %s (%s)%s' % (n['id'], (n.get('label') or '')[:28], n.get('iconKey') or '-',
+                                                  drawn, why, flag))
+        if len(g['nodes']) > 300:
+            print('  ... and %d more' % (len(g['nodes']) - 300))
+        print('  Another icon for one node: the line "%s.<node id> = <icon id>" in '
+              'opennms/etc/org.opennms.features.topology.app.icons.default.cfg' % escaped(ns))
+    return 0
+
+
 def prepare(source, target, svg_folder):
     ids = sorted(icon_ids(svg_folder))
     text = Path(source).read_text()
@@ -148,6 +209,8 @@ if __name__ == '__main__':
             sys.exit(0)
         if len(a) == 4 and a[0] == 'prepare':
             sys.exit(prepare(a[1], a[2], a[3]))
+        if len(a) == 4 and a[0] == 'show':
+            sys.exit(show(a[1], a[2], a[3]))
     except (ET.ParseError, ValueError, OSError) as e:
         print('  problem: %s' % e)
         sys.exit(1)
