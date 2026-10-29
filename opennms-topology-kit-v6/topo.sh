@@ -9,11 +9,13 @@
 #   ./topo.sh undo [-y]             put back the production files the last deploy replaced
 #   ./topo.sh example [N]           list the examples, or apply example N to opennms/ and dev
 #   ./topo.sh diff                  your changes since the last pull or production deploy
-#   ./topo.sh revert [file]         drop those changes (all, or one file), and deploy to dev
+#   ./topo.sh revert [file]         drop those changes (all, or one file), and deploy to dev; your CSS goes to a .bak file
 #   ./topo.sh icons [dev|prod]      the icons in the svg files, and the icon each node gets
 #   ./topo.sh css [dev|prod]        the svg files, style rules that clash, and whether styles/topology.css is there and served
 #   ./topo.sh css <file.svg | icon id>  CSS for the parts of one icon, to copy into styles/topology.css
 #   ./topo.sh pagecheck             lines to paste into the browser console on the topology page: what it loaded, what it shows
+#   ./topo.sh persist               which of your files production keeps at every start, and in a new container
+#   ./topo.sh export [folder]       your files in the layout of production, with a script that installs them there
 #   ./topo.sh view [list [dev|prod]]          the GraphML views there: entries of the View menu
 #   ./topo.sh view show <name> [dev|prod]     a view's nodes: id, label, icon key, the icon drawn
 #   ./topo.sh view icon <name> <node id> <icon id>   another icon for one node of a view (--reset: the view's own)
@@ -280,7 +282,10 @@ deploy() {
   done
   if [ ${#changed[@]} -eq 0 ] && [ ${#stale[@]} -eq 0 ]; then
     if [ ${#theirs[@]} -gt 0 ] || [ ${#both[@]} -gt 0 ]; then say "Nothing else to deploy."
-    elif [ "$quiet" != 1 ]; then say "Nothing to deploy: $(name_of "$to") has these files already."; fi
+    else
+      if [ "$to" = prod ] && [ -n "$style" ]; then prod_style_put "$(md5sum <"$stage/$STYLE_SVG" | cut -c1-32)"; fi
+      if [ "$quiet" != 1 ]; then say "Nothing to deploy: $(name_of "$to") has these files already."; fi
+    fi
     return 0
   fi
   # A changed GraphML view that is loaded there is loaded anew: its cfg files go away for a moment (view_unload) and
@@ -342,6 +347,13 @@ deploy() {
   done
   if [ "$to" = prod ]; then base_put "$stage" "${changed[@]}"; fi # production has them now: the baseline follows
   printf '%s deployed to %s: %s\n' "$(date +%T)" "$(name_of "$to")" "${changed[*]}${stale[*]:+ (removed ${stale[*]})}"
+  if [ -n "$style" ] && [[ " ${changed[*]} " == *" $STYLE_SVG "* ]]; then
+    sum=$(md5sum <"$stage/$STYLE_SVG" | cut -c1-32)
+    if [ "$to" = prod ]; then prod_style_put "$sum"
+    elif [ -f .kit/prod-style ] && [ "$(cat .kit/prod-style)" != "$sum" ]; then # dev has a new $STYLE_CSS, production does not
+      say "  (production still has the previous $STYLE_CSS: ./topo.sh deploy prod when you are happy with it)"
+    fi
+  fi
   [ ${#reload[@]} -eq 0 ] || say "  GraphML views loaded anew: ${reload[*]}"
   if [ ${#svg_new[@]} -gt 0 ]; then
     say "  New there: ${svg_new[*]}. Open the topology page in a new browser tab (Ctrl+T; a private window does too): a"
@@ -409,6 +421,7 @@ undo() {
   fi
   base_put "$bk" "${files[@]}" # production has the old files again: the baseline follows
   base_drop "${added[@]}"
+  rm -f .kit/prod-style # which style file production has now: ./topo.sh css prod asks
   mv "$bk" "$bk.undone"
   say "Done. opennms/ still has your version; reload the topology page."
 }
@@ -592,6 +605,40 @@ view() {
 }
 
 # ./topo.sh css [dev|prod]: the svg files and their style rules, and whether that OpenNMS has styles/topology.css.
+# .kit/prod-style: the md5 of the style file that production had when the kit last looked or sent it. ./topo.sh deploy dev
+# says "production still has the previous styles/topology.css" when a save makes the file differ from that.
+prod_style_put() { # prod_style_put <md5 of the file there, or nothing if it has none>
+  mkdir -p .kit
+  if [ -n "${1:-}" ]; then printf '%s\n' "$1" >.kit/prod-style; else rm -f .kit/prod-style; fi
+}
+
+# What differs between the style file there and the one styles/topology.css makes now, and which of the two is the later one.
+css_difference() { # css_difference <dev|prod> <container> <home>
+  local to=$1 c=$2 home=$3 there_svg=$TMP/there.svg mine_svg=$TMP/mine.svg out n t_there t_mine
+  tp "$to" exec "$c" cat "$home/$STYLE_SVG" >"$there_svg" 2>/dev/null </dev/null || return 0
+  style_svg >"$mine_svg"
+  if diff -q <(tr -d '\r' <"$there_svg") <(tr -d '\r' <"$mine_svg") >/dev/null; then
+    say "  The two files differ in line endings only (CR LF against LF): ./topo.sh deploy $to sends the one that $STYLE_CSS gives."
+  else
+    say "  What differs (- is the file at $(name_of "$to"), + is what $STYLE_CSS gives now):"
+    out=$(diff -U1 "$there_svg" "$mine_svg" | tail -n +3 | awk '{ if (length($0) > 110) $0 = substr($0, 1, 107) "..."; print }' || true)
+    n=$(wc -l <<<"$out")
+    head -n 16 <<<"$out" | sed 's/^/    /'
+    if [ "$n" -gt 16 ]; then say "    ... ($((n - 16)) more lines)"; fi
+  fi
+  if [ -n "${LAST_MOD:-}" ] && t_there=$(date -d "$LAST_MOD" +%s 2>/dev/null) && t_mine=$(stat -c %Y "$STYLE_CSS" 2>/dev/null); then
+    if [ "$t_mine" -gt "$t_there" ]; then
+      n=$((t_mine - t_there))
+      if [ "$n" -lt 120 ]; then n="$n seconds"; else n="$(((n + 30) / 60)) minutes"; fi
+      say "  You saved $STYLE_CSS $n after the file there was written ($(date -u -d "@$t_there" +%H:%M:%S) GMT): the difference is a change"
+      say "  you made after your last deploy to $to."
+    else
+      say "  $STYLE_CSS was saved before the file there was written ($(date -u -d "@$t_there" +%H:%M:%S) GMT), so the difference is no later edit"
+      say "  of it: that file was written from another copy of the kit or another version of $STYLE_CSS, or changed there."
+    fi
+  fi
+}
+
 css_status() {
   local to=$1 c home url n there_now mine sum old mark state=current pt
   [ -d "$WS" ] || die "./topo.sh pull first."
@@ -623,8 +670,10 @@ css_status() {
   else state=older; say "  $(name_of "$to") has an older version: ./topo.sh deploy $to"; fi
   old=$(grep -v -x -e "$STYLE_SVG" -e '' <<<"$(awk 'NF == 1' <<<"$there_now")" | sed 's|.*/||' | tr '\n' ' ' || true)
   [ -z "$old" ] || say "  It also has $old(the hashed names of kit 3.6 and older): the next ./topo.sh deploy $to removes them."
-  CACHE_CTL=''
-  [ -z "$sum" ] || css_served "$to" "$url" "$c" "$mine"
+  CACHE_CTL='' LAST_MOD=''
+  [ -z "$sum" ] || css_served "$to" "$url" "$c" "$mine" "$state"
+  [ "$state" != older ] || css_difference "$to" "$c" "$home"
+  if [ "$to" = prod ]; then prod_style_put "$sum"; fi
   css_files "$to" "$c" "$home"
   say ""
   if [ "$state" = norules ]; then
@@ -673,6 +722,7 @@ http_header() { awk -v k="$1" '{ l = $0; sub(/\r$/, "", l); i = index(l, ":"); i
 # Does a browser keep a file that comes with this Cache-Control header? no: no-store, no-cache or max-age=0 (a reload
 # loads it again); yes: max-age above 0 (it may serve its copy for that long); unknown: no header, or none that says.
 CACHE_CTL='' # what css_served read: the Cache-Control of the style file
+LAST_MOD=''   # and its Last-Modified: when the file there was written
 cache_kept() {
   case $(tr '[:upper:]' '[:lower:]' <<<"$1") in
     *no-store* | *no-cache* | *max-age=0*) echo no ;;
@@ -683,8 +733,8 @@ cache_kept() {
 
 # What the web server answers for the style file, asked the way a browser asks: over the network from this machine; if
 # that fails, from inside the container.
-css_served() { # css_served <dev|prod> <url> <container> <md5 of the text it should serve>
-  local to=$1 u=$2/svg/${STYLE_SVG##*/} c=$3 mine=$4 via head=$TMP/served.head body=$TMP/served.body code type cache last loc size sum
+css_served() { # css_served <dev|prod> <url> <container> <md5 of the text it should serve> <current|older: the file in the container>
+  local to=$1 u=$2/svg/${STYLE_SVG##*/} c=$3 mine=$4 state=${5:-older} via head=$TMP/served.head body=$TMP/served.body code type cache last loc size sum
   # shellcheck disable=SC2016 # runs in the container
   local ask='curl -sS -m 10 -D - -o /tmp/kit-served "$1" && echo "kit-md5 $(md5sum </tmp/kit-served | cut -c1-32)"; rm -f /tmp/kit-served'
   if curl -sS -m 10 -D "$head" -o "$body" "$u" 2>/dev/null; then
@@ -711,8 +761,12 @@ css_served() { # css_served <dev|prod> <url> <container> <md5 of the text it sho
   case $code in
     200)
       CACHE_CTL=$cache
+      LAST_MOD=$last
       if [ "$sum" = "$mine" ]; then say "    200, ${type:-no type}, ${size:-?} bytes: the text that $STYLE_CSS gives."
-      else say "    200, ${type:-no type}, ${size:-?} bytes, but not the text that $STYLE_CSS gives: an older file (./topo.sh deploy $to)."; fi
+      elif [ "$state" = current ]; then
+        say "    200, ${type:-no type}, ${size:-?} bytes, but not the text of the file in the container, which is the one $STYLE_CSS gives:"
+        say "    something between this machine and OpenNMS (a proxy, a cache) answers with another text."
+      else say "    200, ${type:-no type}, ${size:-?} bytes, but not the text that $STYLE_CSS gives now (./topo.sh deploy $to)."; fi
       say "    Cache-Control: ${cache:-none}${last:+; Last-Modified: $last}"
       case $(cache_kept "$cache") in
         no) say "    A reload loads it again (the browser does not reuse a copy)." ;;
@@ -759,6 +813,149 @@ css_files() { # css_files <dev|prod> <container> <home>
   done <<<"$diffs"
 }
 
+# --- What keeps your files on production: ./topo.sh persist, ./topo.sh export -------------------------------------
+
+# Paths below OpenNMS's home of the files that you sent to production: the style file, the files of the production
+# deploys in backups/ (replaced or added; not the undone deploys), and the paths in FILES. Variables of the caller: stage, style.
+custom_set() {
+  local f bk
+  {
+    [ -z "$style" ] || printf '%s\n' "$STYLE_SVG"
+    for bk in backups/*/; do
+      [ -d "$bk" ] || continue
+      case $bk in *.undone/) continue ;; esac
+      (cd "$bk" && find . -type f ! -path './.overlay/*' ! -name .added ! -name .overlay-added | sed 's|^\./||')
+      [ ! -f "$bk/.added" ] || cat "$bk/.added"
+    done
+    for f in ${FILES:-}; do printf '%s\n' "$f"; done
+  } | sort -u | while IFS= read -r f; do # only what exists here now (a removed view or a stale style file does not)
+    [ ! -f "$stage/$f" ] || printf '%s\n' "$f"
+  done
+}
+
+# The files and the overlay plan that persist and export work from. Variables of the caller: c home stage style files
+# custom changed stale ovl_mounts ovl_plan (overlay_plan reads c, stage, files, changed and stale).
+collect_prod() {
+  local plan
+  [ -d "$WS" ] || die "./topo.sh pull first."
+  check_target prod
+  c=$PROD_CONTAINER
+  home=$(home_of prod)
+  stage=$(mktemp -d -p "$TMP")
+  cp -a "$WS/." "$stage/"
+  rm -f "$stage/$SVG_DIR/$STYLE_PREFIX"*.svg
+  style=''
+  if has_rules; then style_svg >"$stage/$STYLE_SVG" && style=$STYLE_SVG; fi
+  mapfile -t files < <(cd "$stage" && find . -type f | sed 's|^\./||' | sort)
+  mapfile -t custom < <(custom_set)
+  changed=("${custom[@]}")
+  stale=()
+  ovl_mounts=$(overlay_mounts prod)
+  ovl_plan=()
+  if [ -n "$ovl_mounts" ] && [ ${#custom[@]} -gt 0 ]; then
+    plan=$(overlay_plan "$ovl_mounts") || die "Could not read the overlay folders of $PROD_CONTAINER."
+    [ -z "$plan" ] || mapfile -t ovl_plan <<<"$plan"
+  fi
+}
+
+persist() {
+  local c home stage style='' files=() custom=() changed=() stale=() ovl_mounts='' ovl_plan=() live f line action folder name file host
+  local mine_sum live_sum ov_sum n=0 lost=0 where verdict now
+  collect_prod
+  if [ ${#custom[@]} -eq 0 ]; then
+    say "There is nothing to check yet: $STYLE_CSS has no rules and no deploy to production is on record (backups/)."
+    return 0
+  fi
+  say "What keeps your files in $(name_of prod) when it restarts, and when its container is created again:"
+  # shellcheck disable=SC2016 # runs in the container
+  live=$(tp prod exec "$c" sh -c 'cd "$1" && shift && md5sum "$@" 2>/dev/null; true' sh "$home" "${custom[@]}" </dev/null)
+  for f in "${custom[@]}"; do
+    n=$((n + 1))
+    mine_sum=$(md5sum <"$stage/$f" | cut -c1-32)
+    live_sum=$(awk -v f="$f" '$2 == f { print $1; exit }' <<<"$live")
+    say "  $f"
+    where='' verdict=''
+    if [ -z "$live_sum" ]; then verdict="not in the container: ./topo.sh deploy prod"; now='no file'
+    elif [ "$live_sum" != "$mine_sum" ]; then verdict="the container has another version than yours: ./topo.sh deploy prod"; now='not yours'
+    else now=yours; fi
+    say "    in the container now:  $now"
+    for line in "${ovl_plan[@]}"; do
+      IFS=$'\t' read -r action folder name file host <<<"$line"
+      [ "$file" = "$f" ] || continue
+      case $action in
+        replace)
+          ov_sum=$(pp exec "$c" md5sum "$folder/$name" 2>/dev/null </dev/null | cut -c1-32 || true)
+          if [ "$ov_sum" = "$mine_sum" ]; then
+            say "    overlay folder:        yours, in $host/$name"
+            where=kept
+          else
+            say "    overlay folder:        NOT yours, in $host/$name: a restart copies that one into OpenNMS"
+            [ -n "$verdict" ] || verdict="the overlay copy is another version: a restart puts it back. ./topo.sh deploy prod updates it"
+          fi ;;
+        add)
+          say "    overlay folder:        none yet ($host would hold it)"
+          [ -n "$verdict" ] || verdict="only in the running container: a restart keeps it, a container that is created again loses it. ./topo.sh deploy prod adds it to $host" ;;
+        skip)
+          say "    overlay folder:        none fits this file"
+          [ -n "$verdict" ] || verdict="only in the container: lost when the container is created again" ;;
+      esac
+    done
+    if [ -z "$where" ] && [ -z "$verdict" ]; then
+      if [[ $f == etc/* ]] && etc_kept prod; then
+        say "    etc volume:            OpenNMS's etc/ is on a volume of the container: it keeps this file at every start"
+        say "                           and in a new container on this machine (not on another machine)"
+        where=kept
+      else verdict="only in the container: a restart keeps it, a container that is created again loses it. ./topo.sh deploy prod adds an overlay copy where one fits"; fi
+    fi
+    if [ -n "$verdict" ]; then say "    => NOT SAFE: $verdict"; lost=$((lost + 1)); else say "    => kept at every start and in a new container"; fi
+  done
+  if [ "$lost" -eq 0 ]; then say "All $n file(s) are kept. ./topo.sh export makes a folder for your source repository and a script that installs it."
+  else say "$lost of $n file(s) are not kept yet."; fi
+}
+
+export_bundle() {
+  local c home stage style='' files=() custom=() changed=() stale=() ovl_mounts='' ovl_plan=() out ts line
+  collect_prod
+  [ ${#custom[@]} -gt 0 ] || die "There is nothing to export yet: $STYLE_CSS has no rules and no deploy to production is on record (backups/).
+Put rules into $STYLE_CSS and ./topo.sh deploy prod, or name files: FILES='etc/org.opennms.features.topology.app.icons.default.cfg' ./topo.sh export"
+  ts=$(date +%Y%m%d-%H%M%S)
+  out=${1:-export/$ts}
+  [ ! -e "$out" ] || die "$out exists already."
+  mkdir -p "$out/styles"
+  {
+    printf 'meta\tssh\t%s\n' "$PROD_SSH"
+    printf 'meta\tcontainer\t%s\n' "$c"
+    printf 'meta\thome\t%s\n' "$home"
+    printf 'meta\tfolder\t%s\n' "$out"
+    printf 'meta\tkit\t%s\n' "$PWD"
+    printf 'meta\tmade\t%s\n' "$(date '+%Y-%m-%d %H:%M')"
+    printf 'file\t%s\n' "${custom[@]}"
+    for line in "${ovl_plan[@]}"; do printf 'plan\t%s\n' "$line"; done
+    if etc_kept prod; then printf 'etc\tyes\n'; else printf 'etc\tno\n'; fi
+  } | python3 tools/export.py "$stage" "$out"
+  if [ -n "$style" ]; then
+    cp "$STYLE_CSS" "$out/styles/topology.css"
+    cp tools/make-style-svg.sh "$out/make-style-svg.sh"
+  else
+    rmdir "$out/styles"
+  fi
+  say "Exported to $out/:"
+  (cd "$out" && find . -type f | sed 's|^\./|  |' | sort)
+  say "Next, on this machine:  scp -r $out $PROD_SSH:"
+  say "then on production:     ssh $PROD_SSH \"cd $(basename "$out") && ./install-on-production.sh\""
+  say "For your source repository: files/overlays/ (the layout of the overlay folders of production)${style:+, styles/topology.css,}"
+  say "${style:+make-style-svg.sh. }GUIDE-production-permanent.md explains each step."
+}
+
+# Before the kit puts the template in place of styles/topology.css: the rules you wrote are kept next to it.
+keep_css() {
+  local bak
+  has_rules || return 0
+  bak=$STYLE_CSS.$(date +%Y%m%d-%H%M%S).bak
+  cp -p "$STYLE_CSS" "$bak"
+  say "Your rules in $STYLE_CSS are kept in $bak (copy it back over $STYLE_CSS to have them again)."
+}
+
 revert() {
   local f v gone=()
   if [ -z "${1:-}" ]; then # views added since the pull leave dev too
@@ -767,12 +964,14 @@ revert() {
   if [ -n "${1:-}" ]; then
     local rel=${1#"$WS"/}
     if [ "$rel" = "$STYLE_CSS" ]; then
+      keep_css
       cp tools/topology.css.template "$STYLE_CSS"
     else
       [ -f "$BASE/$rel" ] || die "$1 is not one of the pulled files."
       cp -a "$BASE/$rel" "$WS/$rel"
     fi
   else
+    keep_css
     rm -rf "$WS" && cp -a "$BASE" "$WS" && cp tools/topology.css.template "$STYLE_CSS"
   fi
   say "Reverted. Deploying to dev:"
@@ -803,6 +1002,8 @@ case ${1:-} in
     esac
     ;;
   revert) revert "${2:-}" ;;
+  persist) persist ;;
+  export) export_bundle "${2:-}" ;;
   view) view "${@:2}" ;;
   pagecheck)
     say "Open the topology page of the OpenNMS to check, in a tab of its own (http://<host>:8980/opennms/topology; log in and"
@@ -821,7 +1022,7 @@ case ${1:-} in
     esac
     ;;
   *)
-    sed -n '2,21p' "$0"
+    sed -n '2,23p' "$0"
     exit 2
     ;;
 esac

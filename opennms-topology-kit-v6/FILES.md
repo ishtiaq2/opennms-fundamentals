@@ -11,7 +11,7 @@ example (`./topo.sh example N`) that changes that file, so you can watch what ha
 | 3 | `etc/org.opennms.features.topology.app.icons.list` | the icons in right-click > Change Icon | when the dialog opens | 04 |
 | 4 | `etc/org.opennms.features.topology.app.cfg` | header, automatic refresh | after the topology app restarts itself (~10 s) | 10 |
 | 5 | `etc/graphml/<name>.xml` and its two `.cfg` files | an entry of the View menu: its nodes, links and icons | when its cfg file appears (a deploy takes it away for 5 s and back) | 11 |
-| 6 | stock stylesheet in the theme jar, overridden by `styles/topology.css` | colours and widths of links, alarm frames, labels; the parts, frame and size of one icon | override: in a new tab after its first deploy, then on reload | 07, 08, 09, 12 |
+| 6 | stock stylesheet in the theme jar, overridden by `styles/topology.css` | colours and widths of links, alarm frames, labels; the parts, frame and size of one icon; the background of the icons | override: in a new tab after its first deploy, then on reload | 07, 08, 09, 12, 13 |
 | 7 | Java/GWT source, compiled into bundles under `system/` | how nodes and links are drawn, the 48 px icon size | after a Maven build and restart | (08 does it with CSS) |
 
 Files 1-5 and the override of 6 are hot: `./topo.sh deploy` copies them into the running container and
@@ -243,7 +243,8 @@ your file (printed by `./topo.sh css`): no label means the page does not have th
 `./topo.sh pagecheck` prints JavaScript for the browser console (F12) on the topology page: it says which svg files the
 page asked for, what the web server gives that browser for `zz-topology-styles.svg`, whether the page took the file in
 (and whether the browser made a style sheet of it or refused it), how many of its rules the browser understood, and
-what `font-size`, `scale` and link colour the first label, icon and link really have (guide, steps 6.2 and 6.4).
+what `font-size`, `scale` and link colour the first label, icon and link really have, and the class, fill and stroke of the
+first frame and the fill that the frames of each icon have (guide, steps 6.2 and 6.4).
 
 **One icon.** Each svg file sits whole in the `<defs>` of the page; a node shows copies of one of its drawings
 (`<use href="#X">`). A rule whose selector holds the drawing's id styles a part of it in every copy, and wins over the
@@ -255,6 +256,14 @@ for parts of a drawing are in its own units, which OpenNMS shrinks to 48 px; `ve
 a stroke in screen pixels. CSS variables pass into the copies:
 `#X .cls-1 { fill: var(--alarm, #1F3A5F); }` with `svg .vertex:has(> rect.status.critical) { --alarm: #CC0000; }`.
 Step 7 of `GUIDE-Maven-abc-styles.md` has the details.
+
+**The green behind the icons** is `rect.status.normal`, the frame of a node without an alarm: the stock rule
+`.vertex .status.normal` gives its `fill` (the background, seen through the transparent parts of the icon) and its
+`stroke` (the frame) the colour `#336600`. `svg .vertex > rect.status.normal { fill: ...; stroke: ...; }` changes it for
+all icons; `svg .vertex:has(use.upIcon[*|href="#X"]) > rect.status.normal { ... }` for the icon X, whichever rule comes
+first in the file (it names more). An alarm keeps its colour because the rules name `normal`. A layer without a vertex
+status provider has `rect.status` with no severity class and `opacity: 0`: write `rect.status` and `opacity: 1`.
+`GUIDE-icon-backgrounds.md` has the rules and a table of colours.
 
 What OpenNMS draws (`GWTVertex.java`, `GWTEdge.java`, `GraphPainter.java`):
 
@@ -292,6 +301,21 @@ severity or set `stroke`, `stroke-width`, `stroke-opacity` or `stroke-dasharray`
 - **Example 09** sets the alarm frame colours and the labels.
 - **Example 12** styles one icon (das_nimbus, or `ICON=<id> ./topo.sh example 12`): the main colour of each of its
   drawings (the alarm colour with a major or critical alarm), a 2 px rounded frame on white, 25 % bigger, crisp edges.
+- **Example 13** replaces the green behind the icons: light grey with a thin frame for all icons, and a colour of its own
+  for each icon that the nodes of your views use (`ICONS="a b" ./topo.sh example 13` names the icons). Alarm frames keep
+  their colours.
+
+## Keeping the files on production (README, section 3; `GUIDE-production-permanent.md`)
+
+A file that `./topo.sh deploy prod` sends is in two places on production: the running container, and the overlay folder
+that the image copies into OpenNMS at every start (`/opt/opennms-overlay`, `/opt/opennms-etc-overlay`,
+`/opt/opennms-jetty-webapps-overlay`; on the host `/opt/maven-nms/data/overlays/...`). `./topo.sh persist` reads both
+and says for each file whether they hold the same version. `./topo.sh export` writes `export/<date>-<time>/` with the
+files at their paths below OpenNMS's home (`files/live/`), the same files as the overlay folders hold them
+(`files/overlays/`), `install-on-production.sh` (backs up what it replaces, `podman cp` into the container, `install`
+into the overlay folders, checks md5 sums and that OpenNMS serves the style file, writes a `restore.sh`),
+`styles/topology.css` and `make-style-svg.sh`. Which files: the style file, the files of the production deploys in
+`backups/` that still exist in `opennms/`, and the paths in the variable `FILES`.
 
 ## 7. Source code (read it; changing it needs a build)
 

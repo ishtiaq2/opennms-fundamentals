@@ -8,6 +8,10 @@ see each change in the browser within seconds, and then copy the finished files 
 cd ~/opennms-fundamentals/opennms-fundamentals/opennms-topology-kit-v6
 ```
 
+Two more guides build on this one: **GUIDE-icon-backgrounds.md** (the green behind the icons: one colour for all icons,
+one for each icon) and **GUIDE-production-permanent.md** (keep the finished files on production for good, and put them
+into your source repository, with the manual steps).
+
 | | |
 |---|---|
 | View menu label | MavenDAS: Home-Lab-_RPI3_OEBB_2222 Requisition: abc |
@@ -48,14 +52,14 @@ Skip what you have done already.
    ssh maven-admin@192.168.0.36 podman ps     # lists the production containers: it works
    ```
 
-4. **The kit, version 3.9 or later** (it goes over version 3.8; with 3.7 or older, unpack the 3.8 update first). Copy
+4. **The kit, version 3.10 or later** (it goes over version 3.9; with 3.8 or older, unpack the 3.9 update first). Copy
    the update archive from the computer with the browser to the development machine, for example with
-   `scp opennms-topology-kit-v3.9-update.tar.gz admin@192.168.0.47:` on that computer. Then, on the development
+   `scp opennms-topology-kit-v3.10-update.tar.gz admin@192.168.0.47:` on that computer. Then, on the development
    machine, unpack it over the kit folder:
 
    ```bash
-   tar xzf ~/opennms-topology-kit-v3.9-update.tar.gz -C ~/opennms-fundamentals/opennms-fundamentals/opennms-topology-kit-v6
-   chmod +x dev.sh topo.sh examples/*.sh   # only if "Permission denied"
+   tar xzf ~/opennms-topology-kit-v3.10-update.tar.gz -C ~/opennms-fundamentals/opennms-fundamentals/opennms-topology-kit-v6
+   chmod +x dev.sh topo.sh examples/*.sh tools/*.sh   # only if "Permission denied"
    ```
 
    It replaces a few kit files and adds this guide. Your `opennms/`, `styles/`, `backups/` and `kit.env` stay as
@@ -246,6 +250,11 @@ hash>.svg` that production got after your pull, and the rules of the svg files t
 links, labels) and so compete with yours. If that OpenNMS has no file or an older one than your `styles/topology.css`
 (dev gets every save from `watch`, production only what `./topo.sh deploy prod` sent), the output ends with
 *"does not have your latest styles/topology.css ... Run: ./topo.sh deploy prod"*, and a page cannot show what is not there.
+Above that line it prints *"What differs"*: the lines of the file there (`-`) against the lines your CSS gives now
+(`+`), at most 16 of them, and how long after the file there was written (its `Last-Modified`) you saved your CSS. A
+difference of a colour or a number is a change you made after your last deploy to that OpenNMS; the same text with
+other line endings is said so. If it says that your CSS is older than the file there, that file was written from
+another copy of the kit or of the CSS.
 
 **Which version of your CSS has this page?** Put a line with only this comment into `styles/topology.css`:
 
@@ -280,7 +289,10 @@ the page and asks the web server for the style file. It prints:
   `translate` need Chrome or Edge 104, Firefox 72 or Safari 14.1), with the label of `/* mark */`, and a warning when
   the page holds an older copy than the server gives now;
 - *nodes on the page*, with the icon each is drawn with (a rule for `#das_helix` reaches the nodes drawn with it only),
-  and the `font-size`, `scale`, link colour and width that the first label, icon and link really have.
+  and the `font-size`, `scale`, link colour and width that the first label, icon and link really have;
+- *first frame* and *background by icon*: the class, `fill` and `stroke` of the first node's frame (`rect.status`), and
+  for each icon the status class and `fill` of its nodes' frames: the colour the green really has on that page
+  (GUIDE-icon-backgrounds.md).
 
 ### 6.3 Rules for every node and link
 
@@ -490,6 +502,9 @@ ICON=das_helix ./topo.sh example 12     # another icon
 It finds the colour that most parts of each drawing have and writes rules for that icon into `styles/topology.css`,
 between `/* example: one icon: <icon id> */` and `/* end: one icon: <icon id> */`. Delete those lines to take it out.
 
+**The green behind the icons** is the `fill` and `stroke` of `rect.status.normal` (step 7.3). `./topo.sh example 13` gives
+all icons one colour and each icon of your views a colour of its own: GUIDE-icon-backgrounds.md explains every line.
+
 ### 7.6 Where each piece is, to check it by hand
 
 | What | This machine | In OpenNMS (the container) | In the browser |
@@ -547,6 +562,10 @@ the properties of a GraphML view.
 ./topo.sh revert                  # all of them
 ```
 
+`./topo.sh revert` puts the template in the place of `styles/topology.css`; your rules are kept first, in
+`styles/topology.css.<date>-<time>.bak` (copy it back over `styles/topology.css` to have them again). To take out one
+example only, delete its lines between `/* example: ... */` and `/* end: ... */`.
+
 ## 10. Hot deploy to production
 
 1. Stop `./topo.sh watch` with Ctrl+C.
@@ -573,6 +592,10 @@ the properties of a GraphML view.
    again to go one deploy further back.
 6. To start from production's files again, for example after its software wrote Maven-abc.xml: `./topo.sh pull`
    makes production's current files (yours included) your new starting point.
+7. To keep the files for good, so that a restart of production, or a new container, does not take them away, and to
+   put them into your source repository: `./topo.sh persist` (it shows for each file whether the container and an
+   overlay folder hold your version), then `./topo.sh export` (a folder with the files in the layout of production's
+   overlay folders and a script that installs them). GUIDE-production-permanent.md has these steps and the manual list.
 
 ## 11. When something is not as expected
 
@@ -584,6 +607,7 @@ the properties of a GraphML view.
 | the icon of a node does not change after a mapping line | the line is not the one for this node, or the page was not reloaded | `./topo.sh view show Maven-abc`: the row of the node must say `(the line Maven-abc.<id> in ...)`; then reload the page |
 | no rule of `styles/topology.css` does anything | the tab opened the page before `zz-topology-styles.svg` was there, and a reload keeps its list of svg files | open the page in a new tab (step 6.1); `./topo.sh css` says whether the file is there |
 | a change of `styles/topology.css` or of an svg file does not show | that OpenNMS does not have it yet (`watch` and `deploy dev` change dev only), or the browser may keep svg files (`./topo.sh css` prints the `Cache-Control`; yours says `no-store`: it does not) | `./topo.sh css prod` says "has an older version": `./topo.sh deploy prod`; else reload with F12 > Network > Disable cache (step 6.1) |
+| after a restart of production the old styles are back | an overlay folder of production held an older file, and the start copied it in | `./topo.sh persist` names the file; `./topo.sh deploy prod` (or step 3.5 of GUIDE-production-permanent.md) puts yours in both places |
 | the styles show on dev, not on production | production does not have your latest CSS (it has the file of your last deploy to it), or its tab was opened before the file was there, or a rule of the same weight in another svg file reached the page after yours | `./topo.sh css prod` and `./topo.sh deploy prod`, a private window, `./topo.sh pagecheck` and the `/* mark */` label (steps 6.2 and 6.4) |
 | a CSS rule does nothing | a stock rule with more classes wins, or a rule for a part of a drawing does not name its id | name the classes of the stock rule, after `svg` (step 6.3); start a rule for a part with the drawing's id (`./topo.sh css <icon id>`, step 7.2); F12 shows which rule wins |
 | an icon shows colours of another icon file | both files define `.cls-1` (or another class) differently, and the one loaded last wins | `./topo.sh css` lists such classes; rules with the id in front settle it (step 7.2) |
@@ -605,6 +629,9 @@ the properties of a GraphML view.
 | `./topo.sh css <icon id or file.svg>` | CSS for the parts of one icon, to copy into `styles/topology.css` |
 | `./topo.sh pagecheck` | JavaScript to paste into the browser console on the topology page: which svg files the page loaded, whether your CSS reached it, what a label really looks like there |
 | `./topo.sh example 12` | one icon styled with CSS: colours, frame, background, size, edges |
+| `./topo.sh example 13` | the green behind the icons: one colour for all icons and one for each icon (GUIDE-icon-backgrounds.md) |
+| `./topo.sh persist` | whether production keeps each file you sent to it: in the container and in an overlay folder, the same version |
+| `./topo.sh export` | your files in the layout of production's overlay folders, with an install script and an undo script (GUIDE-production-permanent.md) |
 | `./topo.sh watch` | deploy every save to dev |
 | `./topo.sh diff`, `./topo.sh revert [file]` | what production does not have yet (since the last pull or deploy); drop it |
 | `./topo.sh deploy prod`, `./topo.sh undo` | hot deploy to production; take the last deploy back |

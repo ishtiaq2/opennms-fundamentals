@@ -4,6 +4,8 @@ Learn and change the OpenNMS files behind `/opennms/topology`: icons, icon mappi
 links. Each change shows in a development OpenNMS that runs your production image, and is then hot deployed to
 production with no restart. **FILES.md** describes each file, with an example you can run.
 **GUIDE-Maven-abc-styles.md** walks through one whole round for a GraphML view: setup, changes, production.
+**GUIDE-icon-backgrounds.md** changes the green behind the icons: one colour for all icons, one for each icon.
+**GUIDE-production-permanent.md** makes the finished files part of production for good, and lists the manual steps.
 
 | Machine | Address | What runs there |
 |---|---|---|
@@ -61,10 +63,10 @@ show has no such field, `./dev.sh up` gives dev's copy one and says so; producti
 ## 2. Learn, change, look
 
 ```bash
-./topo.sh example        # the twelve examples, one per file and effect (FILES.md has the details)
+./topo.sh example        # the thirteen examples, one per file and effect (FILES.md has the details)
 ./topo.sh example 7      # apply one: it changes files in opennms/ or styles/ and deploys them to dev
 ./topo.sh diff           # everything you changed since the last pull or production deploy
-./topo.sh revert         # drop your changes (or one file: ./topo.sh revert <file>)
+./topo.sh revert         # drop your changes (or one file: ./topo.sh revert <file>); your CSS rules are kept in styles/topology.css.<date>.bak
 ./topo.sh watch          # deploy every save to dev, while you edit files in opennms/ and styles/
 ./topo.sh icons          # every icon id, and the icon each node gets (./topo.sh icons prod: production's nodes)
 ./topo.sh css            # the svg files, their clashing rules, whether dev has and serves styles/topology.css (prod: ./topo.sh css prod)
@@ -78,6 +80,8 @@ Reload the topology page after a deploy. Svg files, `styles/topology.css` includ
 new one reaches the page only in a new browser tab; a changed one shows on reload, unless OpenNMS lets the browser keep
 svg files (`./topo.sh css` prints the `Cache-Control` it sends; the OpenNMS of this kit answers `no-store`, so it does
 not). `./topo.sh deploy` says which applies.
+The green behind the icons is the frame of each node (`rect.status.normal`); `./topo.sh example 13` gives all icons one
+colour and each icon of your views its own (GUIDE-icon-backgrounds.md).
 Dev and production are two OpenNMS. `watch` and `deploy dev` change dev only: your CSS shows on production after
 `./topo.sh deploy prod`, in a tab that was opened after the file got there (a private window is one). `./topo.sh css prod`
 says whether production has your latest CSS. A line with only the comment `/* mark */` in `styles/topology.css` shows a
@@ -107,9 +111,16 @@ OpenNMS's home), `/opt/opennms-etc-overlay` (below `etc/`) and `/opt/opennms-jet
 so a deploy that left them alone would be undone by a restart. `./topo.sh deploy prod` therefore looks at those
 folders (on production they are host folders: `./dev.sh prod-info` lists them), shows what it will do there, and
 changes them with the live files: a replaced icon replaces its overlay copy, a new icon goes next to the other
-icons of the overlay, and `./topo.sh undo` puts all of it back. Mapping files live on production's etc volume
-and need no copy of their own. Where production mounts no overlay folder, the files in `jetty-webapps` exist
-only in the container, and a re-created container starts without them.
+icons of the overlay, and `./topo.sh undo` puts all of it back. A mapping file that an overlay folder holds is
+changed there too; one that none holds needs no copy, because production's etc is on a volume. Where production
+mounts no overlay folder, the files in `jetty-webapps` exist only in the container, and a re-created container
+starts without them.
+
+**Permanent.** Both steps of a production deploy, the live file and its overlay copy, make a file survive a restart and a
+re-created container. `./topo.sh persist` checks that for every file you sent to production (it only reads).
+`./topo.sh export` makes a folder with those files in the layout of production's overlay folders (for your source
+repository) and a script that installs them on production, with a backup and an undo; the manual steps, with plain
+`scp`, `podman cp` and `install` commands, are in GUIDE-production-permanent.md.
 
 **Backups.** Each production deploy (and `./topo.sh view remove <name> prod`) first saves what it changes in
 `backups/<date>-<time>/`: the files it replaces or removes, at their paths below `/opt/opennms`; `.added`, the files it
@@ -129,6 +140,8 @@ renames it `<date>-<time>.undone`; run it again to go one deploy further back. `
 | `.kit/overlays/opennms-overlay/` | production's `/opt/opennms-overlay` without `etc/`, and the dev-only login page if one was needed | production, `./dev.sh up` |
 | `.kit/overlays/opennms-jetty-webapps-overlay/` | production's `/opt/opennms-jetty-webapps-overlay` | production, `./dev.sh up` |
 | `backups/` | what each production deploy replaced (section 3) | `./topo.sh deploy prod` |
+| `export/<date>-<time>/` | your files in the layout of production's overlay folders, with an install script (section 3) | `./topo.sh export` |
+| `styles/topology.css.<date>.bak` | your CSS rules, kept when `./topo.sh revert` put the template in their place | `./topo.sh revert` |
 | `.kit/opennms-start.log` | the log of a start that failed | `./dev.sh up` |
 
 ```bash
@@ -169,6 +182,8 @@ ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml  # 
 | `./dev.sh prod-info` | production container: image, command, user, privileges, ports, volumes, variable names, overlay files, web settings, login page |
 | `./topo.sh pull [prod\|dev]` | copy the topology files into `opennms/` (from production: also onto dev) |
 | `./topo.sh deploy dev\|prod [-y]`, `./topo.sh undo [-y]` | hot deploy; undo the last production deploy |
+| `./topo.sh persist` | for each file you sent to production: is it in the container and in an overlay folder, and the same in both (GUIDE-production-permanent.md) |
+| `./topo.sh export [folder]` | your files in the layout of production, with a script that installs them there and one that undoes it |
 | `./topo.sh watch`, `example [N]`, `diff`, `revert [file]`, `icons [dev\|prod]` | see section 2 |
 | `./topo.sh css [dev\|prod]`, `./topo.sh css <icon id \| file.svg>` | the svg files and their style rules, whether that OpenNMS has your CSS; CSS for the parts of one icon (FILES.md, section 6) |
 | `./topo.sh view [list [dev\|prod]]`, `view show <name> [dev\|prod]`, `view add <file> [name]`, `view remove <name> [dev\|prod]` | GraphML views (FILES.md, section 5) |
@@ -209,6 +224,9 @@ ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml  # 
   keep svg files (`max-age`), reload with the browser cache off (F12 > Network > Disable cache). The line `/* mark */`
   in `styles/topology.css` puts a version label on the page, and `./topo.sh pagecheck` prints JavaScript for the browser
   console that says what the page loaded (FILES.md, section 6; guide, step 6.4).
+- **After a restart of production the old styles (or an old icon) are back**: an overlay folder held an older copy of the
+  file, and the start copied it in. `./topo.sh persist` shows which file; `./topo.sh deploy prod` updates the overlay copy
+  (GUIDE-production-permanent.md, step 3.5, does it by hand).
 - **A GraphML view is not in the View menu**: `./topo.sh view list` shows whether its cfg file is there; reload the
   page. `./dev.sh logs` (karaf.log) names the error if OpenNMS could not read the file.
 - **The page is "unreachable" from your computer**: the firewall. Run

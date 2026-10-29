@@ -5,6 +5,6 @@
    with the id of its drawing (./topo.sh css <icon id> prints such rules).
    To see a change: open the page in a new tab after the first deploy of this file, then reload.
    Production gets this file only with ./topo.sh deploy prod; ./topo.sh css prod says whether it has
-   your latest version and serves it. FILES.md, section 6, lists what OpenNMS draws; examples 07-09
-   and 12 add rules here. The guide, steps 6.2 and 6.4, shows a label that names the version a page
+   your latest version and serves it. FILES.md, section 6, lists what OpenNMS draws; examples 07-09,
+   12 and 13 add rules here. The guide, steps 6.2 and 6.4, shows a label that names the version a page
    has, and ./topo.sh pagecheck says what the page loaded. */

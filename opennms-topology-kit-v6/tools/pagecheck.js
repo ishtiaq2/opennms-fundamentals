@@ -66,6 +66,17 @@
     if (lab) { const s = getComputedStyle(lab); say('first label: font-size ' + s.fontSize + ', font-weight ' + s.fontWeight + ', fill ' + s.fill); }
     const ic = document.querySelector('g.vertex g.icon-container');
     if (ic) say('first icon container: scale ' + (getComputedStyle(ic).scale || 'not known to this browser'));
+    const fr = document.querySelector('g.vertex rect.status');
+    if (fr) { const s = getComputedStyle(fr); say('first frame (rect.status): class "' + fr.getAttribute('class') + '", fill ' + s.fill + ', stroke ' + s.stroke + ', stroke-width ' + s.strokeWidth + ', opacity ' + s.opacity); }
+    const bg = {};
+    document.querySelectorAll('g.vertex').forEach(g => {
+      const u = g.querySelector('use.upIcon'), r = g.querySelector('rect.status');
+      if (!u || !r) return;
+      const k = href(u) || '?', s = getComputedStyle(r);
+      (bg[k] = bg[k] || []).push((r.getAttribute('class') || '').replace(/^status\s*/, '') + ' ' + s.fill);
+    });
+    const kinds = Object.entries(bg).map(([k, v]) => k + ': ' + [...new Set(v)].join(', '));
+    if (kinds.length) say('background by icon (the status class and the fill of each node\'s frame): ' + kinds.join(' | '));
     const ed = document.querySelector('path.edge');
     if (ed) { const s = getComputedStyle(ed); say('first link: class "' + ed.getAttribute('class') + '", stroke ' + s.stroke + ', stroke-width ' + s.strokeWidth); }
     const lb = getComputedStyle(document.body, '::after').content;

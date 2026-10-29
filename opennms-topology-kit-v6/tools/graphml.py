@@ -17,6 +17,9 @@
   graphml.py icon <file> <icon mapping file> <svg folder> <node id> <icon id | --reset>
       writes the line "<namespace>.<node id> = <icon id>" into the icon mapping file (the namespace is the one of
       the node's layer, a colon is escaped); --reset takes the line out again
+  graphml.py used <etc folder> <svg folder>
+      the icon ids that the nodes of all the views in <etc folder>/graphml are drawn with (an svg file must define
+      them), one per line, in alphabetical order: the ids to give a colour of their own (examples/13)
 """
 import re
 import sys
@@ -251,6 +254,23 @@ def show(path, svg_folder, etc_folder):
     return 0
 
 
+def used(etc_folder, svg_folder):
+    """Print the icon ids that the nodes of the views in etc_folder/graphml are drawn with and that an svg file defines."""
+    defined, maps = defined_ids(svg_folder), load_maps(etc_folder)
+    found = set()
+    for f in sorted(Path(etc_folder, 'graphml').glob('*.xml')):
+        try:
+            graphs = read(f)[1]
+        except (ET.ParseError, ValueError, OSError):  # a broken view is not the business of this list
+            continue
+        for g in graphs:
+            ns = g['props'].get('namespace', '')
+            found.update(icon_of(ns, n, maps)[0] for n in g['nodes'])
+    for icon in sorted(found & defined):
+        print(icon)
+    return 0
+
+
 def set_icon(path, cfg, svg_folder, node_id, icon_id):
     """The line for one node in the icon mapping file cfg; icon_id --reset takes it out."""
     root, graphs = read(path)
@@ -343,6 +363,8 @@ if __name__ == '__main__':
             sys.exit(show(a[1], a[2], a[3]))
         if len(a) == 6 and a[0] == 'icon':
             sys.exit(set_icon(*a[1:]))
+        if len(a) == 3 and a[0] == 'used':
+            sys.exit(used(a[1], a[2]))
     except (ET.ParseError, ValueError, OSError) as e:
         print('  problem: %s' % e)
         sys.exit(1)
