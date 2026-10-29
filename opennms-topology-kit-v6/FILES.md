@@ -65,7 +65,8 @@ with a new name is ignored. Add your lines to an existing file.
 
 For each node OpenNMS takes the first match (`IconRepositoryManager.getSVGIconId`):
 
-1. **`<namespace>.<vertex id>`**: a mapping for this one node. Right-click > Change Icon writes these.
+1. **`<namespace>.<vertex id>`**: a mapping for this one node, in any of these files. Right-click > Change Icon writes
+   these. It works for GraphML views too: `./topo.sh view show <name>` prints the namespace and the node ids.
 2. **The node's icon key.** If that key has no mapping, the key without its last `.part` is tried, and so on.
    - **Enhanced Linkd** gives a node `linkd.system.snmp.<sysObjectID>` (`linkd.system` without SNMP), in namespace `nodes` (`nodes:<layer>` for a layer). The vertex id is the node id.
    - **GraphML:** the node's `iconKey` is the icon id itself.
@@ -163,6 +164,7 @@ A node without `foreignSource` and `foreignID` (or `nodeID`) is a drawing only: 
 
 ```bash
 ./topo.sh view list [dev|prod]             # the views there, with their View-menu labels
+./topo.sh view show <name> [dev|prod]      # its nodes: id, label, icon key, the icon drawn
 ./topo.sh view add my-view.graphml [name]  # checks the file, writes it and its two cfg files into opennms/, deploys to dev
 ./topo.sh deploy dev                       # after a change of opennms/etc/graphml/<name>.xml: the view is loaded anew
 ./topo.sh deploy prod                      # to production, with confirmation, backups/ and ./topo.sh undo
@@ -173,6 +175,12 @@ A node without `foreignSource` and `foreignID` (or `nodeID`) is a drawing only: 
 id, a link to an unknown node, no or a taken namespace), lists icon keys that no svg file defines, and replaces `@orion@`,
 `@helix@`, ... with the icon id of that word in the svg folder. `./topo.sh pull` copies production's views into `opennms/`
 with the other topology files (but not the demo view).
+
+**A view that production's software writes** (one per requisition, for example) may be written again at any time. Change
+its look around the file where you can: a line `<namespace>.<node id> = <icon id>` in
+`etc/org.opennms.features.topology.app.icons.default.cfg` gives one node another icon and wins over its `iconKey`, the
+svg files and `styles/topology.css` do the rest. A production deploy leaves alone a view file that production changed
+after your pull. `GUIDE-Maven-abc-styles.md` walks through it.
 
 - **Example 11** adds the view "My DAS (GraphML)": a room drawn above four demo nodes.
 
@@ -196,7 +204,8 @@ It is not hot. `./topo.sh pull` copies the file to `reference/topo_default-style
 **Hot:** a `<style>` in any file of the svg folder applies to the whole topology page (section 1).
 `./topo.sh deploy` puts `styles/topology.css` there as `zz-topology-styles.<hash>.svg`. Its name changes
 with its content, so no browser shows an old copy. Start selectors with `svg` so they beat the stock rules:
-`svg path.edge.up` beats `.edge.up`.
+`svg path.edge.up` beats `.edge.up`. A selector also needs the classes of the stock rule: `svg path.edge` loses to
+`.edge.normal`.
 
 What OpenNMS draws (`GWTVertex.java`, `GWTEdge.java`, `GraphPainter.java`):
 
@@ -213,7 +222,9 @@ What OpenNMS draws (`GWTVertex.java`, `GWTEdge.java`, `GraphPainter.java`):
 
 Severities are `indeterminate`, `cleared`, `normal`, `warning`, `minor`, `major` and `critical`. Enhanced
 Linkd links are `up` or `down` (`LinkdEdgeStatusProvider`) and carry the inline 3px width, so a width rule
-needs `!important`.
+needs `!important`. GraphML links are `normal`, unless scripts in `etc/graphml-edge-status/` give them another
+severity or set `stroke`, `stroke-width`, `stroke-opacity` or `stroke-dasharray` inline
+(`GraphMLEdgeStatusProvider`).
 
 | Stock rule | Colour |
 |---|---|

@@ -3,6 +3,7 @@
 Learn and change the OpenNMS files behind `/opennms/topology`: icons, icon mappings, icon size and colours,
 links. Each change shows in a development OpenNMS that runs your production image, and is then hot deployed to
 production with no restart. **FILES.md** describes each file, with an example you can run.
+**GUIDE-Maven-abc-styles.md** walks through one whole round for a GraphML view: setup, changes, production.
 
 | Machine | Address | What runs there |
 |---|---|---|
@@ -82,6 +83,11 @@ A deploy compares each file with the container's copy and copies the changed one
 Production's icons, mappings and styles are then the ones from your development machine. Nothing restarts;
 reload the topology page.
 
+A production deploy sends only what you changed since your pull (`.kit/baseline`). A file that production changed
+after the pull, and you did not (its software writes GraphML views again, someone used Change Icon), stays as
+production has it; a file both of you changed is held back until you send it with `FORCE=1 ./topo.sh deploy prod`.
+After a deploy, `./topo.sh pull` makes production's current files your new starting point.
+
 **Overlay folders.** The image copies three folders into OpenNMS at every start: `/opt/opennms-overlay` (below
 OpenNMS's home), `/opt/opennms-etc-overlay` (below `etc/`) and `/opt/opennms-jetty-webapps-overlay` (below
 `jetty-webapps/`). A file in one of them overwrites a hot-deployed file with its old content at the next start,
@@ -151,7 +157,7 @@ ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml  # 
 | `./topo.sh pull [prod\|dev]` | copy the topology files into `opennms/` (from production: also onto dev) |
 | `./topo.sh deploy dev\|prod [-y]`, `./topo.sh undo [-y]` | hot deploy; undo the last production deploy |
 | `./topo.sh watch`, `example [N]`, `diff`, `revert [file]`, `icons [dev\|prod]` | see section 2 |
-| `./topo.sh view [list [dev\|prod]]`, `view add <file> [name]`, `view remove <name> [dev\|prod]` | GraphML views (FILES.md, section 5) |
+| `./topo.sh view [list [dev\|prod]]`, `view show <name> [dev\|prod]`, `view add <file> [name]`, `view remove <name> [dev\|prod]` | GraphML views (FILES.md, section 5) |
 
 ## When something goes wrong
 

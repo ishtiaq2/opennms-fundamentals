@@ -12,6 +12,7 @@
 #   ./topo.sh revert [file]         drop your changes since the pull (all, or one file), and deploy to dev
 #   ./topo.sh icons [dev|prod]      the icons in the svg files, and the icon each node gets
 #   ./topo.sh view [list [dev|prod]]          the GraphML views there: entries of the View menu
+#   ./topo.sh view show <name> [dev|prod]     a view's nodes: id, label, icon key, the icon drawn
 #   ./topo.sh view add <file.graphml> [name]  a GraphML file becomes a view in opennms/ and on dev
 #   ./topo.sh view remove <name> [dev|prod]   takes a view out of opennms/ and away there
 source "$(dirname "$0")/tools/common.sh"
@@ -139,12 +140,21 @@ overlay_write() { # the staged files into the folders, as the plan says
 pull() {
   local from=${1:-prod} c home f files jar
   case $from in dev | prod) ;; *) die "usage: ./topo.sh pull [prod|dev]" ;; esac
-  if [ -d "$WS" ] && [ "${FORCE:-}" != 1 ] && changes; then
-    die "You changed files since the last pull (./topo.sh diff). Deploy them, or ./topo.sh revert, or: FORCE=1 ./topo.sh pull $from"
-  fi
   check_target "$from"
   c=$(container_of "$from")
   home=$(home_of "$from")
+  # Your changes since the last pull must not get lost: those that the source has already (deployed) are fine.
+  if [ -d "$WS" ] && [ "${FORCE:-}" != 1 ] && changes; then
+    mapfile -t files < <(cd "$WS" && find . -type f | sed 's|^\./||' | while IFS= read -r f; do cmp -s "$f" "../$BASE/$f" || echo "$f"; done)
+    if [ ${#files[@]} -gt 0 ]; then
+      # shellcheck disable=SC2016 # runs in the container
+      mapfile -t files < <(cd "$WS" && md5sum "${files[@]}" | diff - <(tp "$from" exec "$c" sh -c 'cd "$1" && shift && md5sum "$@" 2>/dev/null; true' sh "$home" "${files[@]}") |
+        sed -n 's/^< [0-9a-f]*  //p')
+    fi
+    [ ${#files[@]} -eq 0 ] || die "These files have changes that $(name_of "$from") does not have (./topo.sh diff):
+$(printf '  %s\n' "${files[@]}")
+Deploy them, or ./topo.sh revert, or drop them: FORCE=1 ./topo.sh pull $from"
+  fi
   say "Copying the topology files from $(name_of "$from")"
   mkdir -p "$TMP/ws/etc" "$TMP/ws/jetty-webapps/opennms"
   # shellcheck disable=SC2016 # runs in the container
@@ -181,7 +191,7 @@ sys.stdout.write(zipfile.ZipFile(sys.argv[1]).read("VAADIN/themes/topo_default/s
 }
 
 deploy() {
-  local to=${1:-} yes=0 quiet=0 a c home stage remote f v sum style='' ts bk ovl_mounts='' plan files=() changed=() stale=() ovl_plan=() names=() reload=()
+  local to=${1:-} yes=0 quiet=0 a c home stage remote f v sum base_sum style='' ts bk ovl_mounts='' plan files=() changed=() stale=() ovl_plan=() names=() reload=() mine=() theirs=() both=()
   case $to in dev | prod) ;; *) die "usage: ./topo.sh deploy dev|prod [-y]" ;; esac
   shift
   for a in "$@"; do case $a in -y) yes=1 ;; -q) quiet=1 ;; esac; done
@@ -207,8 +217,32 @@ deploy() {
     [ "$(awk -v f="$f" '$1 != "-" && $2 == f { print $1; exit }' <<<"$remote")" = "$sum" ] || changed+=("$f")
   done
   mapfile -t stale < <(awk -v keep="$style" '$1 == "-" && $2 != keep { print $2 }' <<<"$remote")
+  # Production may change a file after your pull: its own software writes GraphML views, someone uses Change Icon.
+  # A production deploy sends your changes only. A file you left as pulled stays as production has it now; a file
+  # that both of you changed is held back (FORCE=1 sends it anyway). The pull (.kit/baseline) tells which is which.
+  if [ "$to" = prod ] && [ "${FORCE:-}" != 1 ] && [ -d "$BASE" ]; then
+    for f in "${changed[@]}"; do
+      if [ ! -f "$BASE/$f" ]; then mine+=("$f"); continue; fi # new since the pull
+      base_sum=$(md5sum <"$BASE/$f" | cut -c 1-32)
+      sum=$(awk -v f="$f" '$1 != "-" && $2 == f { print $1; exit }' <<<"$remote")
+      if [ "$sum" = "$base_sum" ]; then mine+=("$f")          # production has it as pulled: yours goes
+      elif cmp -s "$BASE/$f" "$stage/$f"; then theirs+=("$f") # you did not change it, production did
+      else both+=("$f"); fi
+    done
+    changed=("${mine[@]}")
+    if [ ${#theirs[@]} -gt 0 ]; then
+      warn "Production changed (or removed) these files after your pull. They stay as production has them; ./topo.sh pull copies them here:"
+      printf '  %s\n' "${theirs[@]}" >&2
+    fi
+    if [ ${#both[@]} -gt 0 ]; then
+      warn "You and production both changed these files after your pull, so they are held back. Compare (./topo.sh diff;"
+      warn "./topo.sh view show <name> prod for a view), then send yours with FORCE=1 ./topo.sh deploy prod:"
+      printf '  %s\n' "${both[@]}" >&2
+    fi
+  fi
   if [ ${#changed[@]} -eq 0 ] && [ ${#stale[@]} -eq 0 ]; then
-    [ "$quiet" = 1 ] || say "Nothing to deploy: $(name_of "$to") has these files already."
+    if [ ${#theirs[@]} -gt 0 ] || [ ${#both[@]} -gt 0 ]; then say "Nothing else to deploy."
+    elif [ "$quiet" != 1 ]; then say "Nothing to deploy: $(name_of "$to") has these files already."; fi
     return 0
   fi
   # A changed GraphML view that is loaded there is loaded anew: its cfg files go away for a moment (view_unload) and
@@ -354,11 +388,33 @@ view_list() {
   lines=$(tp "$to" exec "$c" sh -c 'cd "$1" && for f in etc/org.opennms.features.topology.plugins.topo.graphml-*.cfg; do
       [ -f "$f" ] || continue; n=${f#*.graphml-}
       printf "%s\t%s\t%s\n" "${n%.cfg}" "$(sed -n "s/^label *= *//p" "$f")" "$(sed -n "s/^topologyLocation *= *//p" "$f")"; done' sh "$home" </dev/null)
-  say "GraphML views in $(name_of "$to"); the View menu shows each label:"
+  say "GraphML views in $(name_of "$to"): name, the label of the View menu, the file"
   [ -n "$lines" ] || { say "  none"; return 0; }
   while IFS=$'\t' read -r name label file; do
-    printf '  %-18s %-30s %s%s\n' "$name" "\"$label\"" "${file#"$home"/}" "$([ ! -f "$WS/etc/graphml/$name.xml" ] || echo '   (also in opennms/)')"
+    label=$(sed -E 's/\\(.)/\1/g' <<<"$label") # the cfg file is a Java properties file: "\:" is ":"
+    file=${file#"$home"/}
+    printf '  %-18s "%s"\n  %-18s %s%s\n' "$name" "$label" '' "${file#/opt/opennms/}" \
+      "$([ ! -f "$WS/etc/graphml/$name.xml" ] || echo '   (also in opennms/)')"
   done <<<"$lines"
+}
+
+view_show() { # the nodes of a view: id, label, icon key, the icon drawn (tools/graphml.py show)
+  local name=$1 to=${2:-} file="$WS/etc/graphml/$1.xml" c home
+  [ -d "$WS" ] || die "./topo.sh pull first."
+  if [ -n "$to" ] || [ ! -f "$file" ]; then # not in opennms/, or asked for: the container's copy
+    to=${to:-dev}
+    case $to in dev | prod) ;; *) die "usage: ./topo.sh view show <name> [dev|prod]" ;; esac
+    check_target "$to"
+    c=$(container_of "$to")
+    home=$(home_of "$to")
+    file="$TMP/$name.xml"
+    tp "$to" cp "$c:$home/etc/graphml/$name.xml" - 2>/dev/null | tar -xOf - >"$file" 2>/dev/null ||
+      die "$(name_of "$to") has no view $name (./topo.sh view list $to)."
+    say "View $name in $(name_of "$to"), with the icon mappings of opennms/etc:"
+  else
+    say "View $name in opennms/etc/graphml/$name.xml, with the icon mappings of opennms/etc:"
+  fi
+  python3 tools/graphml.py show "$file" "$WS/$SVG_DIR" "$WS/etc"
 }
 
 view_add() {
@@ -441,9 +497,10 @@ view_remove() {
 view() {
   case ${1:-list} in
     list) view_list "${2:-dev}" ;;
+    show) [ -n "${2:-}" ] || die "usage: ./topo.sh view show <name> [dev|prod]"; view_show "$2" "${3:-}" ;;
     add) [ -n "${2:-}" ] || die "usage: ./topo.sh view add <file.graphml> [name]"; view_add "$2" "${3:-}" ;;
     remove) [ -n "${2:-}" ] || die "usage: ./topo.sh view remove <name> [dev|prod]"; view_remove "$2" "${3:-dev}" ;;
-    *) die "usage: ./topo.sh view [list [dev|prod] | add <file.graphml> [name] | remove <name> [dev|prod]]" ;;
+    *) die "usage: ./topo.sh view [list [dev|prod] | show <name> [dev|prod] | add <file.graphml> [name] | remove <name> [dev|prod]]" ;;
   esac
 }
 
@@ -488,7 +545,7 @@ case ${1:-} in
     esac
     ;;
   *)
-    sed -n '2,16p' "$0"
+    sed -n '2,17p' "$0"
     exit 2
     ;;
 esac
