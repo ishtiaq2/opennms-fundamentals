@@ -1,0 +1,5 @@
+/* Your CSS for /opennms/topology.
+   ./topo.sh deploys it inside jetty-webapps/opennms/svg/zz-topology-styles.<hash>.svg: OpenNMS loads
+   every svg of that folder into the topology page, so these rules apply there, over the stock
+   stylesheet (reference/topo_default-styles.css). Start rules with "svg" so they win.
+   Examples 07-09 add rules here; FILES.md, section 6, lists the elements and classes. */
