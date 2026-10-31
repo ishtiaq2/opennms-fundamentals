@@ -1,0 +1,15 @@
+# OpenNMS UI Studio as a service of your user (README.md, section 8):
+#   cp scripts/opennms-ui-studio.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+#   systemctl --user enable --now opennms-ui-studio
+[Unit]
+Description=OpenNMS UI Studio
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/opennms-fundamentals/opennms-ui-studio
+ExecStart=/usr/bin/env node server/dist/main.js
+Restart=on-failure
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

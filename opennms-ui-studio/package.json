@@ -1,0 +1,22 @@
+{
+  "name": "opennms-ui-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Change the OpenNMS topology look and the menu bar labels with a live preview, try them on a development OpenNMS, then apply them to production. A learning project: every file it touches is shown.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build -w server && npm run build -w web",
+    "start": "node server/dist/main.js",
+    "test": "npm test -w server",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+  }
+}

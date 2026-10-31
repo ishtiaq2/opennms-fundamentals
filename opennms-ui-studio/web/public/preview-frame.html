@@ -1,0 +1,147 @@
+<!doctype html>
+<!--
+  The preview of the topology page. It is built the way OpenNMS 33.1.8 builds /opennms/topology, so that CSS
+  behaves here as it does there:
+    - the stock stylesheet (topo_default/styles.css) is a <style> of the page            (OpenNMS: the Vaadin theme)
+    - every svg file of jetty-webapps/opennms/svg/ goes whole into the first <defs>       (D3.injectSVGDef)
+    - your CSS is the last of them, like zz-topology-styles.svg
+    - each node is <g class="vertex"> with rect.status, g.icon-container (use.upIcon, use.overIcon, use.activeIcon),
+      text.vertex-label and rect.svgIconOverlay; each link is <path class="edge normal" style="stroke-width: 3px">
+                                                                                           (GWTVertex, GWTEdge)
+  The studio's page drives it with window.preview: load(), setCss(), draw(), inspect().
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Topology preview</title>
+    <style id="stock"></style>
+    <style>
+      html, body { margin: 0; height: 100%; background: #fff; font-family: 'Open Sans', Arial, sans-serif; overflow: hidden; }
+      #map { width: 100%; height: 100%; display: block; }
+      #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #667; font: 14px Arial, sans-serif; }
+    </style>
+  </head>
+  <body>
+    <svg id="map" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+      <defs></defs>
+      <g id="hiddenIconContainer" opacity="0"></g>
+      <g id="edges"></g>
+      <g id="vertices"></g>
+    </svg>
+    <div id="empty">Loading the files of OpenNMS…</div>
+    <script>
+      var NS = 'http://www.w3.org/2000/svg';
+      var XL = 'http://www.w3.org/1999/xlink';
+      var userStyle = null;
+      var current = { nodes: [], edges: [] };
+
+      function el(tag, attrs, parent) {
+        var e = document.createElementNS(NS, tag);
+        Object.keys(attrs).forEach(function (k) {
+          if (k === 'href') e.setAttributeNS(XL, 'xlink:href', attrs[k]);
+          else e.setAttribute(k, attrs[k]);
+        });
+        if (parent) parent.appendChild(e);
+        return e;
+      }
+
+      function tell(message) {
+        if (window.parent !== window) window.parent.postMessage(Object.assign({ source: 'topology-preview' }, message), '*');
+      }
+
+      // One node, as GWTVertex.create() and draw() make it.
+      function vertex(v, layer) {
+        var hidden = document.getElementById('hiddenIconContainer');
+        var probe = el('use', { href: '#' + v.icon }, hidden);
+        var box = probe.getBBox();
+        hidden.removeChild(probe);
+        var prime = Math.max(box.width, box.height);
+        var f = prime ? 48 / prime : 0.001;
+        var w = f * box.width, h = f * box.height;
+        if (!prime) { w = 48; h = 48; }
+        var g = el('g', { class: 'vertex' + (v.selected ? ' selected' : ''), transform: 'translate( ' + v.x + ',' + v.y + ')', 'data-key': v.key }, layer);
+        el('rect', { class: 'status ' + (v.status || ''), fill: 'none', 'stroke-width': 5, 'stroke-location': 'outside', stroke: 'blue', opacity: 0,
+          width: w + 'px', height: h + 'px', x: -w / 2 + 'px', y: -h / 2 + 'px' }, g);
+        var ic = el('g', { class: 'icon-container', transform: 'translate(-' + w / 2 + ' , -' + h / 2 + ') scale(' + f + ')', opacity: 1 }, g);
+        el('use', { href: '#' + v.icon, class: 'upIcon' }, ic);
+        var over = el('use', { href: '#' + v.icon + '_rollover', class: 'overIcon', opacity: 0 }, ic);
+        el('use', { href: '#' + v.icon + '_active', class: 'activeIcon', opacity: v.selected ? 1 : 0 }, ic);
+        var t = el('text', { class: 'vertex-label', x: '0px', y: (h / 2 + 11) + 'px', 'text-anchor': 'middle', 'alignment-baseline': 'text-before-edge' }, g);
+        t.textContent = v.label;
+        var overlay = el('rect', { class: 'svgIconOverlay', width: w + 'px', height: h + 'px', x: -w / 2 + 'px', y: -h / 2 + 'px', opacity: 0 }, g);
+        overlay.addEventListener('mouseenter', function () { over.setAttribute('opacity', 1); });
+        overlay.addEventListener('mouseleave', function () { over.setAttribute('opacity', 0); });
+        overlay.addEventListener('click', function () { tell({ type: 'select', key: v.key }); });
+      }
+
+      window.preview = {
+        // The stock stylesheet and the svg files of an OpenNMS.
+        load: function (data) {
+          document.getElementById('stock').textContent = data.stockCss || '';
+          var defs = document.querySelector('defs');
+          while (defs.firstChild) defs.removeChild(defs.firstChild);
+          (data.svgFiles || []).forEach(function (f) {
+            var doc = new DOMParser().parseFromString(f.text, 'image/svg+xml');
+            if (doc.getElementsByTagName('parsererror').length) return; // OpenNMS skips a file it cannot read, too
+            defs.appendChild(document.importNode(doc.documentElement, true));
+          });
+          var holder = el('svg', { width: 0, height: 0 }, defs);
+          holder.appendChild(document.createComment(' Made by topo.sh from styles/topology.css. (preview) '));
+          userStyle = el('style', {}, holder);
+          document.getElementById('empty').style.display = 'none';
+        },
+        setCss: function (css) {
+          if (userStyle) userStyle.textContent = css || '';
+        },
+        // nodes: [{key, label, icon, status, selected}], edges: [{source, target}] (keys)
+        draw: function (nodes, edges) {
+          current = { nodes: nodes, edges: edges };
+          var vs = document.getElementById('vertices'), es = document.getElementById('edges');
+          vs.textContent = '';
+          es.textContent = '';
+          var cols = Math.max(1, Math.ceil(Math.sqrt(nodes.length * 1.8)));
+          var at = {};
+          nodes.forEach(function (n, i) {
+            n.x = 110 + (i % cols) * 175;
+            n.y = 90 + Math.floor(i / cols) * 150 + ((i % cols) % 2) * 30;
+            at[n.key] = n;
+          });
+          edges.forEach(function (e) {
+            var a = at[e.source], b = at[e.target];
+            if (!a || !b) return;
+            var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - 25;
+            el('path', { class: 'edge normal', d: 'M ' + a.x + ' ' + a.y + ' Q ' + mx + ' ' + my + ' ' + b.x + ' ' + b.y, fill: 'none', style: 'stroke-width: 3px' }, es);
+          });
+          nodes.forEach(function (n) { vertex(n, vs); });
+          var maxX = 0, maxY = 0;
+          nodes.forEach(function (n) { maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y); });
+          var map = document.getElementById('map');
+          map.setAttribute('viewBox', '0 0 ' + Math.max(500, maxX + 110) + ' ' + Math.max(260, maxY + 100));
+          map.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+          if (!nodes.length) {
+            var empty = document.getElementById('empty');
+            empty.textContent = 'This view has no nodes.';
+            empty.style.display = 'flex';
+          }
+        },
+        // What the browser computes for one node: the colours and sizes your CSS gives it.
+        inspect: function (key) {
+          var g = document.querySelector('g.vertex[data-key="' + (window.CSS && CSS.escape ? CSS.escape(key) : key) + '"]');
+          if (!g) return null;
+          var r = getComputedStyle(g.querySelector('rect.status'));
+          var t = getComputedStyle(g.querySelector('text.vertex-label'));
+          var ic = getComputedStyle(g.querySelector('.icon-container'));
+          return {
+            frame: { className: g.querySelector('rect.status').getAttribute('class'), fill: r.fill, stroke: r.stroke, strokeWidth: r.strokeWidth, opacity: r.opacity, rx: r.rx },
+            label: { fontSize: t.fontSize, fontWeight: t.fontWeight, fill: t.fill },
+            icon: { scale: ic.scale || 'none', filter: ic.filter },
+          };
+        },
+        rulesUnderstood: function () {
+          return userStyle && userStyle.sheet ? userStyle.sheet.cssRules.length : 0;
+        },
+      };
+      tell({ type: 'ready' });
+    </script>
+  </body>
+</html>
