@@ -1,0 +1,94 @@
+/* Icons 72 px instead of 48 px, with their frame; labels below them */
+svg .vertex .icon-container,
+svg .vertex > rect.status,
+svg .vertex > rect.svgIconOverlay {
+  scale: 1.5 !important;
+}
+
+svg .vertex > text.vertex-label {
+  translate: 0 12px !important;
+}
+
+svg .vertex > .status-badge-container,
+svg .vertex > .node-status-counter {
+  translate: 32px -12px !important;
+}
+
+/* Labels */
+svg .vertex > text.vertex-label {
+  font-size: 32px !important;
+  font-weight: bold !important;
+  fill: #1F3A5F !important;
+}
+
+/* Links: colour and width (the width needs !important) */
+svg path.edge,
+svg path.edge.normal {
+  stroke: #C62828 !important;
+  fill: #C62828 !important;
+}
+
+/* Alarm frames behind the icons, by severity */
+svg .vertex > rect.status.major,
+svg .vertex > rect.status.critical {
+  stroke: #C62828 !important;
+  fill: #C62828 !important;
+}
+
+/* Every node drawn with das_helix: the icon tinted blue, and a blue label */
+svg .vertex use.upIcon[*|href="#das_helix"] { filter: sepia(1) saturate(5) hue-rotate(180deg); }
+svg .vertex:has(use.upIcon[*|href="#das_helix"]) > text.vertex-label { fill: #2E6AC7; }
+
+/* Every node drawn with orion: in grey */
+svg .vertex use.upIcon[*|href="#orion"] { filter: grayscale(1); }
+
+/* --- FIX FOR NIMBUS STACKING BUG --- */
+/* Tell the SVG to hide the nested active/rollover layers when the icon is in the "up" (default) state */
+svg .vertex use.upIcon {
+  --nimbus-active-opacity: 0;
+  --nimbus-rollover-opacity: 0;
+}
+svg .vertex use.overIcon {
+  --nimbus-active-opacity: 0;
+  --nimbus-rollover-opacity: 1;
+}
+svg .vertex use.activeIcon {
+  --nimbus-active-opacity: 1;
+  --nimbus-rollover-opacity: 0;
+}
+
+svg .vertex > rect.status.normal {
+  fill: transparent !important;
+  stroke: transparent !important;
+}
+
+/* Apply the transparency to the groups */
+#nimbus_active {
+  opacity: var(--nimbus-active-opacity, 1) !important;
+}
+#nimbus_rollover {
+  opacity: var(--nimbus-rollover-opacity, 1) !important;
+}
+
+/* --- NIMBUS EXACT COLOURS --- */
+/* 1. Default State -> Red (#CC0000) */
+#nimbus_default .cls-1,
+#nimbus_default .cls-2,
+#nimbus_default .cls-3 {
+  fill: #CC0000 !important;
+}
+
+/* 2. Active State -> Magenta (#ff00ff) */
+#nimbus_active .active-cls-1,
+#nimbus_active .active-cls-2,
+#nimbus_active .active-cls-3 {
+  fill: green !important;
+}
+
+/* 3. Rollover State -> Light Grey (#f0f0f0) */
+#nimbus_rollover .rollover-cls-1,
+#nimbus_rollover .rollover-cls-2,
+#nimbus_rollover .rollover-cls-3,
+#nimbus_rollover .rollover-cls-4 {
+  fill: black !important;
+}

@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"><!-- Made by topo.sh from styles/topology.css. -->
+<style><![CDATA[
+/* Icons 72 px instead of 48 px, with their frame; labels below them */
+svg .vertex .icon-container,
+svg .vertex > rect.status,
+svg .vertex > rect.svgIconOverlay {
+  scale: 1.5 !important;
+}
+
+svg .vertex > text.vertex-label {
+  translate: 0 12px !important;
+}
+
+svg .vertex > .status-badge-container,
+svg .vertex > .node-status-counter {
+  translate: 32px -12px !important;
+}
+
+/* Labels */
+svg .vertex > text.vertex-label {
+  font-size: 32px !important;
+  font-weight: bold !important;
+  fill: #1F3A5F !important;
+}
+
+/* Links: colour and width (the width needs !important) */
+svg path.edge,
+svg path.edge.normal {
+  stroke: #808080 !important;
+  fill: #808080 !important;
+}
+
+/* Alarm frames behind the icons, by severity */
+svg .vertex > rect.status.major,
+svg .vertex > rect.status.critical {
+  stroke: #808080 !important;
+  fill: #808080 !important;
+}
+
+/* Every node drawn with das_helix: the icon tinted blue, and a blue label */
+svg .vertex use.upIcon[*|href="#das_helix"] { filter: sepia(1) saturate(5) hue-rotate(180deg); }
+svg .vertex:has(use.upIcon[*|href="#das_helix"]) > text.vertex-label { fill: #2E6AC7; }
+
+/* Every node drawn with orion: in grey */
+svg .vertex use.upIcon[*|href="#orion"] { filter: grayscale(1); }
+]]></style></svg>

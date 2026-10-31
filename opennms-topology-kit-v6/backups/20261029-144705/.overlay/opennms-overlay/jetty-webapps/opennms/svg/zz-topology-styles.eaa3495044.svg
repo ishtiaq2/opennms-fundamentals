@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"><!-- Made by topo.sh from styles/topology.css. -->
+<style><![CDATA[
+/* Icons 72 px instead of 48 px, with their frame; labels below them */
+svg .vertex .icon-container,
+svg .vertex > rect.status,
+svg .vertex > rect.svgIconOverlay {
+  scale: 1.5 !important;
+}
+
+svg .vertex > text.vertex-label {
+  translate: 0 12px !important;
+}
+
+svg .vertex > .status-badge-container,
+svg .vertex > .node-status-counter {
+  translate: 12px -12px !important;
+}
+
+/* Labels */
+svg .vertex > text.vertex-label {
+  font-size: 12px !important;
+  font-weight: bold !important;
+  fill: #1F3A5F !important;
+}
+
+/* Links: colour and width (the width needs !important) */
+svg path.edge,
+svg path.edge.normal {
+  stroke: #1F3A5F !important;
+  stroke-width: 4px !important;
+}
+
+/* Alarm frames behind the icons, by severity */
+svg .vertex > rect.status.major,
+svg .vertex > rect.status.critical {
+  stroke: #C62828 !important;
+  fill: #C62828 !important;
+}
+]]></style></svg>

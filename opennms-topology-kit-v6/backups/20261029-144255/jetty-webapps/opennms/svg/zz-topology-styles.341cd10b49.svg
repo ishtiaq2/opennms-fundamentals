@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"><!-- Made by topo.sh from styles/topology.css. -->
+<style><![CDATA[
+/* Your CSS for /opennms/topology.
+   ./topo.sh deploys it inside jetty-webapps/opennms/svg/zz-topology-styles.<hash>.svg: OpenNMS loads
+   every svg of that folder into the topology page, so these rules apply there, over the stock
+   stylesheet (reference/topo_default-styles.css). Start rules with "svg" so they win.
+   Examples 07-09 add rules here; FILES.md, section 6, lists the elements and classes. */
+
+
+/* Icons 72 px instead of 48 px, with their frame; labels below them */
+svg .vertex .icon-container, svg .vertex > rect.status, svg .vertex > rect.svgIconOverlay { scale: 1.5; }
+svg .vertex > text.vertex-label { translate: 0 12px; }
+svg .vertex > .status-badge-container, svg .vertex > .node-status-counter { translate: 12px -12px; }
+
+/* Labels */
+svg .vertex > text.vertex-label { font-size: 12px; font-weight: bold; fill: #1F3A5F; }
+
+/* Links: colour and width (the width needs !important), selected and under the mouse */
+svg path.edge, svg path.edge.normal { stroke: #1F3A5F; stroke-width: 4px !important; }
+svg path.edge.selected { stroke: #F28C28; }
+svg path.edge:hover { stroke: #2E7D32; }
+
+/* Alarm frames behind the icons, by severity (only in a view with alarm colours: status in step 4) */
+svg .vertex > rect.status.major, svg .vertex > rect.status.critical { stroke: #C62828; fill: #C62828; }
+]]></style></svg>
