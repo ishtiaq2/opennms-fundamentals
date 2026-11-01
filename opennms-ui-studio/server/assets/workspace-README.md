@@ -9,6 +9,7 @@ each OpenNMS got (`../backups/journal.jsonl`).
 |---|---|---|
 | `topology/topology.css` | your CSS for the topology page | `jetty-webapps/opennms/svg/zz-topology-styles.svg`: the CSS inside an svg file, because OpenNMS puts every file of that folder into the topology page |
 | `topology/icon-mappings.json` | which node gets which icon: `{"<namespace>.<node id>": "<icon id>"}` | lines between two comments of the studio in `etc/org.opennms.features.topology.app.icons.default.cfg` |
+| `topology/icons/<name>.svg` | your copy of an icon file (only when you made one: Topology > Icon files > *Make a repaired copy*) | `jetty-webapps/opennms/svg/<name>.svg`, sent by an apply when it differs from the file in that OpenNMS |
 | `menu/labels.json` | your words for the menu bar: `plugins` (the Plugins menu) and `menuNames` (entries of dispatcher-servlet.xml, by id) | `jetty-webapps/opennms/WEB-INF/templates/navbar.ftl` (the bar of the JSP pages), `jetty-webapps/opennms/ui/assets/index-<hash>.js` (the bar of the Vue pages) and `jetty-webapps/opennms/WEB-INF/dispatcher-servlet.xml` |
 
 You can edit these files with any editor too: the studio sees the change. `kit/topo.sh` (the topology kit) uses
