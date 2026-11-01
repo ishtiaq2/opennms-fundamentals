@@ -18,6 +18,11 @@
           <td>The topology page loads every file of <code>svg/</code> into its <code>&lt;defs&gt;</code> (IconRepositoryManager, D3.injectSVGDef), so a <code>&lt;style&gt;</code> in one of them styles the whole page. A new browser tab gets a new file; a reload gets a changed one.</td>
         </tr>
         <tr>
+          <td><code>topology/icons/&lt;name&gt;.svg</code> (only when you make one)</td>
+          <td><code>jetty-webapps/opennms/svg/&lt;name&gt;.svg</code>: your copy of an icon file, for example one with its ids repaired</td>
+          <td>The same folder, the same way: the page asks for every <code>*.svg</code> in it. A changed file comes with a reload; a file that is new needs a new browser tab.</td>
+        </tr>
+        <tr>
           <td><code>topology/icon-mappings.json</code></td>
           <td>lines <code>&lt;namespace&gt;.&lt;node id&gt; = &lt;icon id&gt;</code> between two comments of the studio in <code>etc/org.opennms.features.topology.app.icons.default.cfg</code></td>
           <td>OpenNMS (Karaf) reads a changed <code>.cfg</code> file of <code>etc/</code> within a second; the next reload of the page draws the node with that icon.</td>
@@ -39,6 +44,7 @@
           <select v-model="snippet" aria-label="Rules to start from">
             <option value="">Insert rules to start from…</option>
             <option v-for="(s, i) in SNIPPETS" :key="s.name" :value="String(i)">{{ s.name }}</option>
+            <option value="parts" :disabled="!selected">The parts of the icon you clicked (its classes and colours)</option>
           </select>
           <button type="button" :disabled="snippet === ''" @click="insertSnippet">Insert</button>
         </div>
@@ -54,6 +60,23 @@
           </details>
         </div>
         <pre v-if="showGenerated" class="generated-file">{{ summary?.generated.text }}</pre>
+        <details class="reach" v-if="reaches.length" :open="reachBad + reachWarn > 0">
+          <summary>
+            What your rules reach in this preview
+            <span v-if="reachBad" class="bad">{{ reachBad }} match{{ reachBad === 1 ? 'es' : '' }} nothing</span>
+            <span v-if="reachWarn" class="warn">{{ reachWarn }} may not show</span>
+          </summary>
+          <ul>
+            <li v-for="(r, i) in reaches" :key="i" :class="r.verdict.level">
+              <code>{{ r.reach.selector }}</code>
+              <span>{{ r.verdict.text }}</span>
+            </li>
+          </ul>
+          <p class="hint">
+            Counted in the preview, with the files of {{ source === 'dev' ? 'dev' : 'production' }}. A rule for the parts of an icon (<code>#id .cls-1</code>) reaches
+            the shapes of the drawing, and every node shows a copy of them.
+          </p>
+        </details>
       </section>
 
       <section class="pane">
@@ -68,7 +91,7 @@
           <button type="button" class="ghost" @click="loadPreview(true)">Read the files again</button>
         </div>
         <div class="preview-wrap">
-          <TopologyPreview ref="preview" :data="data" :css="css" :nodes="previewNodes" :edges="previewEdges" @select="select" />
+          <TopologyPreview ref="preview" :data="shownData" :css="css" :nodes="previewNodes" :edges="previewEdges" @select="select" />
           <p v-if="previewError" class="error overlay-msg">{{ previewError }}</p>
         </div>
         <div class="inspector" v-if="selected">
@@ -77,6 +100,12 @@
             Drawn with <code>{{ selected.icon }}</code>{{ selected.defined ? '' : ' (no svg file defines it: OpenNMS draws only a frame and the label)' }},
             because of {{ selected.why }}. iconKey in the view: <code>{{ selected.iconKey || 'none' }}</code>.
           </p>
+          <p v-if="selectedErrors.length" class="flaw">
+            <strong>{{ selectedIcon?.file.name }} is built so that this icon does not show what its colours say.</strong>
+            {{ selectedErrors[0].message }}
+            <button type="button" class="link" @click="scrollToIcons">What to do: Icon files, below</button>
+          </p>
+          <p v-else-if="selectedIcon?.fromCopy" class="hint">Drawn from your repaired copy of {{ selectedIcon.file.name }}.</p>
           <div class="row">
             <label>Another icon for this node
               <select :value="mappings[selected.key] ?? ''" @change="setIcon(($event.target as HTMLSelectElement).value)">
@@ -99,6 +128,58 @@
       </section>
     </div>
 
+    <section class="icon-files" id="icon-files" v-if="iconReport">
+      <div class="icons-head">
+        <h2>Icon files</h2>
+        <button type="button" class="ghost" @click="loadIcons(true)">Check again</button>
+      </div>
+      <p class="hint">
+        OpenNMS draws a node with <code>&lt;use href="#X"&gt;</code>, which draws <em>everything</em> inside the element with the id X; under the mouse it
+        draws <code>#X_rollover</code> and when selected <code>#X_active</code>. So a file needs three groups <em>next to each other</em> (the stock files put them in
+        <code>&lt;g id="X_icon"&gt;</code>). The files of {{ source === 'dev' ? 'the development OpenNMS' : 'production' }} are checked for that.
+      </p>
+      <ul v-if="skipped.length" class="problems">
+        <li v-for="f in skipped" :key="f.name"><code>{{ f.name }}</code> is not well-formed XML ({{ f.error }}): OpenNMS skips it, and so does the preview.</li>
+      </ul>
+      <p v-if="iconError" class="error">{{ iconError }}</p>
+      <ul class="ifiles">
+        <li v-for="f in iconReport.files" :key="f.name" class="ifile" :class="fileLevel(f)">
+          <div class="ihead">
+            <code class="iname">{{ f.name }}</code>
+            <span v-if="f.icons.length" class="ids">icon{{ f.icons.length > 1 ? 's' : '' }}: <code v-for="i in f.icons" :key="i.id">{{ i.id }}</code></span>
+            <span class="verdict">{{ fileVerdict(f) }}</span>
+          </div>
+          <div v-for="p in f.problems" :key="p.kind + p.icon" class="problem" :class="p.severity">
+            <p>{{ p.message }}</p>
+            <p v-if="p.fix" class="fix">The repair: {{ p.fix.summary }}. In the file: <template v-for="(r, i) in p.fix.renames" :key="r.from"><template v-if="i">, </template><code>id="{{ r.from }}"</code> becomes <code>id="{{ r.to }}"</code></template>. Nothing else changes.</p>
+            <p v-else-if="p.noFix" class="muted">No automatic repair: {{ p.noFix }}</p>
+          </div>
+          <div v-if="f.copy" class="copy">
+            <p>
+              Your copy: <code>workspace/topology/icons/{{ f.name }}</code>
+              <template v-if="f.copy.same"> is what {{ source === 'dev' ? 'dev' : 'production' }} has.</template>
+              <template v-else-if="f.missing"> is a new file for the OpenNMS: Apply sends it.</template>
+              <template v-else> differs from the file of {{ source === 'dev' ? 'dev' : 'production' }}: the preview draws your copy, and Apply sends it.</template>
+              <template v-if="f.copy.problems.some((p) => p.severity === 'error')"> It still has a flaw (above, for the copy).</template>
+              <template v-else> It has no flaw.</template>
+            </p>
+            <div v-for="p in f.copy.problems.filter((q) => q.severity === 'error')" :key="'c' + p.kind + p.icon" class="problem error"><p>{{ p.message }}</p></div>
+          </div>
+          <div class="actions">
+            <button v-if="canRepair(f)" type="button" class="primary" :disabled="repairing === f.name" @click="repair(f.name)">
+              {{ f.copy ? 'Repair my copy' : 'Make a repaired copy in the workspace' }}
+            </button>
+            <button v-if="f.copy" type="button" class="ghost" @click="removeCopy(f.name)">Remove my copy (the studio stops sending it)</button>
+          </div>
+        </li>
+      </ul>
+      <p v-if="!iconReport.files.length" class="muted">No svg files were found there.</p>
+      <p class="hint">
+        A copy is an ordinary file in your workspace (a git repository): edit it with any editor, the studio sees the change, and the history keeps it.
+        Apply sends it like the CSS, keeps the old file, and Undo puts it back.
+      </p>
+    </section>
+
     <section class="apply">
       <h2>Apply</h2>
       <div class="states">
@@ -108,6 +189,7 @@
           <span :class="s.style.served.same ? 'ok' : 'muted'">serves it: {{ s.style.served.status ? `HTTP ${s.style.served.status}${s.style.served.same ? ', your version' : ''}` : 'no answer' }}<template v-if="s.style.served.cacheControl">, Cache-Control: {{ s.style.served.cacheControl }}</template></span>
           <span v-if="s.target === 'prod'" class="muted">overlay copy: {{ s.style.overlays.length ? s.style.overlays.map((o) => `${o.onHost}${o.md5 === s.style.expected ? ' (yours)' : o.md5 ? ' (another version)' : ' (none yet)'}`).join(', ') : s.style.overlayNote }}</span>
           <span :class="s.mappings.upToDate ? 'ok' : 'bad'">icon mappings {{ s.mappings.upToDate ? 'as yours' : 'differ from yours' }}</span>
+          <span v-for="i in s.icons ?? []" :key="i.name" :class="i.same ? 'ok' : 'bad'">{{ i.name }}: {{ i.same ? 'as your copy' : i.present ? 'differs from your copy' : 'not there yet' }}</span>
         </div>
       </div>
       <div class="panels">
@@ -124,11 +206,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { api, type PreviewData, type TargetName, type TopologyState, type TopologySummary } from '../api'
+import { api, type IconFileReport, type IconsInfo, type PreviewData, type TargetName, type TopologyState, type TopologySummary } from '../api'
 import CssEditor from '../components/CssEditor.vue'
 import LearnBox from '../components/LearnBox.vue'
 import TargetPanel from '../components/TargetPanel.vue'
-import TopologyPreview from '../components/TopologyPreview.vue'
+import TopologyPreview, { type RuleReach } from '../components/TopologyPreview.vue'
+import { describeReach, flawedGroup, iconOf, layersOf, partsCss, type Verdict } from '../lib/iconRules'
 import { SNIPPETS } from '../lib/snippets'
 import { definedIds, demoGraph, drawnNodes, iconIds, mappingTable, parseGraphml, type DrawnNode, type Graph } from '../lib/topologyModel'
 import { store } from '../store'
@@ -158,22 +241,37 @@ const computedStyle = ref<{ frame: { className: string; fill: string; stroke: st
 const mappings = ref<Record<string, string>>({})
 const states = ref<TopologyState[]>([])
 const planKey = ref(0)
+const iconReport = ref<IconsInfo | null>(null)
+const iconError = ref('')
+const repairing = ref('')
+const skipped = ref<{ name: string; error: string }[]>([])
+const reachRaw = ref<RuleReach[]>([])
 
 const status = computed(() => store.status)
 const devUrl = computed(() => `${location.protocol}//${location.hostname}:${store.status?.dev.port ?? 8980}/opennms`)
 const saveText = computed(() => ({ saved: 'saved', saving: 'saving…', dirty: 'changed', error: `not saved: ${saveError.value}` })[saveState.value])
 
-const graphs = computed<Graph[]>(() => {
-  if (!data.value) return []
-  const all = data.value.views.flatMap((v) => parseGraphml(v.file, v.text))
-  const withNodes = all.filter((g) => g.nodes.length)
-  return withNodes.length ? withNodes : [demoGraph(iconIds(data.value.svgFiles))]
+// The files of that OpenNMS, with your copies of icon files in place of the files of the same name: what an apply would give.
+const shownData = computed<PreviewData | null>(() => {
+  const d = data.value
+  if (!d) return null
+  const mine = iconReport.value?.workspace ?? []
+  if (!mine.length) return d
+  const byName = new Map(d.svgFiles.map((f) => [f.name, f]))
+  for (const m of mine) byName.set(m.name, { name: m.name, text: m.text })
+  return { ...d, svgFiles: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)) }
 })
-const icons = computed(() => (data.value ? iconIds(data.value.svgFiles) : []))
+const graphs = computed<Graph[]>(() => {
+  if (!shownData.value) return []
+  const all = shownData.value.views.flatMap((v) => parseGraphml(v.file, v.text))
+  const withNodes = all.filter((g) => g.nodes.length)
+  return withNodes.length ? withNodes : [demoGraph(iconIds(shownData.value.svgFiles))]
+})
+const icons = computed(() => (shownData.value ? iconIds(shownData.value.svgFiles) : []))
 const nodes = computed<DrawnNode[]>(() => {
   const g = graphs.value[graphIndex.value]
-  if (!g || !data.value) return []
-  return drawnNodes(g, mappingTable(data.value, mappings.value), definedIds(data.value.svgFiles))
+  if (!g || !shownData.value) return []
+  return drawnNodes(g, mappingTable(shownData.value, mappings.value), definedIds(shownData.value.svgFiles))
 })
 function effectiveStatus(key: string): string {
   const i = nodes.value.findIndex((n) => n.key === key)
@@ -198,6 +296,14 @@ const previewEdges = computed(() => {
   return g.edges.map((e) => ({ source: `${g.namespace}.${e.source}`, target: `${g.namespace}.${e.target}` }))
 })
 const selected = computed(() => nodes.value.find((n) => n.key === selectedKey.value) ?? null)
+const selectedIcon = computed(() => (selected.value ? iconOf(iconReport.value?.files, selected.value.icon) : null))
+const selectedErrors = computed(() => (selectedIcon.value?.problems ?? []).filter((p) => p.severity === 'error'))
+
+const reaches = computed<{ reach: RuleReach; verdict: Verdict }[]>(() =>
+  reachRaw.value.map((reach) => ({ reach, verdict: describeReach(reach, (group) => flawedGroup(iconReport.value?.files, group)) })),
+)
+const reachBad = computed(() => reaches.value.filter((r) => r.verdict.level === 'bad').length)
+const reachWarn = computed(() => reaches.value.filter((r) => r.verdict.level === 'warn').length)
 
 async function loadSummary(replace: boolean) {
   const s = await api.topology()
@@ -218,6 +324,81 @@ async function loadPreview(refresh = false) {
   } catch (e) {
     previewError.value = `Could not read the files of ${source.value === 'dev' ? 'the development OpenNMS' : 'production'}: ${(e as Error).message}`
   }
+}
+
+async function loadIcons(refresh = false) {
+  iconError.value = ''
+  try {
+    iconReport.value = await api.icons(source.value, refresh)
+  } catch (e) {
+    iconError.value = `Could not check the icon files of ${source.value === 'dev' ? 'the development OpenNMS' : 'production'}: ${(e as Error).message}`
+  }
+}
+
+function fileLevel(f: IconFileReport): 'ok' | 'warn' | 'bad' {
+  const errors = (list: { severity: string }[]) => list.some((p) => p.severity === 'error')
+  if (f.stock) return 'ok'
+  if (errors(f.problems) && !(f.copy && !errors(f.copy.problems))) return 'bad'
+  if (errors(f.problems)) return 'warn'
+  if (f.copy && errors(f.copy.problems)) return 'bad'
+  return 'ok'
+}
+
+function fileVerdict(f: IconFileReport): string {
+  const where = source.value === 'dev' ? 'dev' : 'production'
+  if (f.stock) return 'OpenNMS’s own file: not checked'
+  const level = fileLevel(f)
+  if (f.missing && f.copy) return 'your new file (not in OpenNMS yet)'
+  if (level === 'warn') return `flawed in ${where}; your repaired copy waits for an apply`
+  if (f.copy?.same) return `${where} has your copy`
+  if (level === 'bad') return 'has a flaw'
+  if (f.problems.length) return 'works (notes below)'
+  return f.icons.length || f.hasStyle ? 'fine' : 'no icon in it'
+}
+
+/** A repair is offered when there is a flaw that has one: in the file, or in your copy of it. */
+function canRepair(f: IconFileReport): boolean {
+  const list = f.copy ? f.copy.problems : f.problems
+  return list.some((p) => p.severity === 'error' && p.fix)
+}
+
+async function repair(name: string) {
+  repairing.value = name
+  iconError.value = ''
+  try {
+    iconReport.value = await api.repairIcon(source.value, name)
+    planKey.value++
+    void loadStates()
+  } catch (e) {
+    iconError.value = (e as Error).message
+  } finally {
+    repairing.value = ''
+  }
+}
+
+async function removeCopy(name: string) {
+  iconError.value = ''
+  try {
+    iconReport.value = await api.removeIconCopy(source.value, name)
+    planKey.value++
+    void loadStates()
+  } catch (e) {
+    iconError.value = (e as Error).message
+  }
+}
+
+function scrollToIcons() {
+  document.getElementById('icon-files')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+// What the rules reach is counted in the preview page, a moment after the CSS or the drawing changed.
+let reachTimer: number | undefined
+function scheduleReach() {
+  clearTimeout(reachTimer)
+  reachTimer = window.setTimeout(() => {
+    reachRaw.value = preview.value?.rules() ?? []
+    skipped.value = preview.value?.skipped() ?? []
+  }, 350)
 }
 
 async function loadStates() {
@@ -255,8 +436,15 @@ watch(css, (value) => {
   }, 700)
 })
 
-watch(source, () => loadPreview())
-watch(() => store.workspaceVersion, () => loadSummary(false))
+watch(source, async () => {
+  await loadPreview()
+  await loadIcons()
+})
+watch(() => store.workspaceVersion, () => {
+  void loadSummary(false)
+  void loadIcons()
+})
+watch([css, shownData, previewNodes], scheduleReach)
 watch([selectedKey, css, () => previewNodes.value], () => {
   requestAnimationFrame(() => {
     computedStyle.value = selectedKey.value ? ((preview.value?.inspect(selectedKey.value) as typeof computedStyle.value) ?? null) : null
@@ -277,7 +465,25 @@ async function setIcon(icon: string) {
   planKey.value++
 }
 
+/** Rules made from the drawing of the icon you clicked: its classes, and the colours the browser gives them. */
+function insertParts() {
+  const node = selected.value
+  if (!node) return
+  const found = selectedIcon.value
+  const layers = layersOf(node.icon, found?.info ?? null)
+  const read = preview.value?.partsOf(layers.map((l) => l.group)) ?? []
+  const stacked = found?.problems.find((p) => p.kind === 'stacked')
+  const note = stacked
+    ? `${found?.file.name} holds the drawings of ${node.icon} inside #${node.icon}, so a node shows the last one, #${found?.info.visible}. Repair the file (Icon files, below) to colour the normal look on its own.`
+    : null
+  editor.value?.insert(
+    partsCss(node.icon, found?.file.name ?? null, layers.map((l, i) => ({ when: l.when, use: l.use, group: read[i] ?? { id: l.group, found: false, parts: [], unclassed: 0 } })), note),
+  )
+  snippet.value = ''
+}
+
 function insertSnippet() {
+  if (snippet.value === 'parts') return insertParts()
   const s = SNIPPETS[Number(snippet.value)]
   if (!s) return
   const icon = selected.value?.icon ?? icons.value[0] ?? 'server'
@@ -295,14 +501,17 @@ async function importCss() {
   }
 }
 
-function afterApply() {
+async function afterApply() {
   void loadStates()
   planKey.value++
+  await loadPreview(true)
+  await loadIcons(true)
 }
 
 onMounted(async () => {
   await loadSummary(true)
   await loadPreview()
+  await loadIcons()
   await loadStates()
 })
 </script>
@@ -339,4 +548,39 @@ onMounted(async () => {
 .muted { color: var(--muted); }
 .hint { color: var(--muted); font-size: 13px; }
 .error { color: var(--bad); }
+.warn { color: var(--warn); }
+.link { background: none; border: 0; padding: 0; color: var(--link, #1d5fd1); text-decoration: underline; cursor: pointer; font: inherit; }
+.reach { border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; background: var(--panel); font-size: 13px; }
+.reach summary { cursor: pointer; display: flex; gap: 12px; flex-wrap: wrap; font-weight: 600; }
+.reach summary span { font-weight: normal; }
+.reach ul { list-style: none; padding: 0; margin: 8px 0; }
+.reach li { display: grid; grid-template-columns: minmax(120px, 36%) 1fr; gap: 10px; padding: 4px 0 4px 8px; border-left: 3px solid var(--line); margin-bottom: 4px; }
+.reach li code { font-size: 12px; word-break: break-all; }
+.reach li.ok { border-left-color: var(--ok); }
+.reach li.warn { border-left-color: var(--warn); }
+.reach li.bad { border-left-color: var(--bad); }
+.reach li.info { border-left-color: var(--muted); }
+.flaw { border: 1px solid var(--warn); border-left-width: 4px; border-radius: 6px; padding: 6px 10px; background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.icon-files { margin-top: 18px; }
+.icons-head { display: flex; align-items: baseline; gap: 12px; }
+.icons-head h2 { margin: 0; }
+.ifiles { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 8px; }
+.ifile { border: 1px solid var(--line); border-left-width: 4px; border-radius: 8px; padding: 8px 12px; background: var(--panel); font-size: 13px; }
+.ifile.ok { border-left-color: var(--ok); }
+.ifile.warn { border-left-color: var(--warn); }
+.ifile.bad { border-left-color: var(--bad); }
+.ihead { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+.iname { font-weight: 600; }
+.ids code { margin-left: 4px; }
+.verdict { margin-left: auto; color: var(--muted); }
+.ifile.bad .verdict { color: var(--bad); }
+.ifile.warn .verdict { color: var(--warn); }
+.problem { margin: 6px 0; padding-left: 8px; border-left: 3px solid var(--line); }
+.problem.error { border-left-color: var(--bad); }
+.problem p { margin: 2px 0; }
+.fix { color: var(--text); }
+.copy { margin: 6px 0; padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--ok) 6%, transparent); }
+.copy p { margin: 2px 0; }
+.ifile .actions { margin-top: 6px; display: flex; gap: 10px; flex-wrap: wrap; }
+.problems { color: var(--warn); font-size: 13px; }
 </style>

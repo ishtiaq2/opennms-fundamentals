@@ -15,6 +15,8 @@ export interface TopologySummary {
   cssPath: string
   css: string
   mappings: Record<string, string>
+  /** Names of your icon files in workspace/topology/icons/ */
+  iconCopies: string[]
   hasRules: boolean
   mark: string | null
   generated: { rel: string; md5: string; size: number; text: string }
@@ -44,6 +46,47 @@ export interface TopologyState {
     overlayNote: string
   }
   mappings: { rel: string; upToDate: boolean }
+  icons: { name: string; rel: string; same: boolean; present: boolean }[]
+}
+
+export interface IconFix {
+  summary: string
+  renames: { from: string; to: string }[]
+}
+
+export interface IconProblem {
+  kind: string
+  severity: 'error' | 'note'
+  icon: string
+  message: string
+  fix: IconFix | null
+  noFix?: string
+}
+
+export interface IconInfo {
+  id: string
+  hasNormal: boolean
+  hasRollover: boolean
+  hasActive: boolean
+  hasWrapper: boolean
+  stacked: string[]
+  visible: string
+}
+
+export interface IconFileReport {
+  name: string
+  stock: boolean
+  hasStyle: boolean
+  icons: IconInfo[]
+  problems: IconProblem[]
+  missing: boolean
+  copy: null | { size: number; md5: string; same: boolean; icons: IconInfo[]; problems: IconProblem[] }
+}
+
+export interface IconsInfo {
+  target: TargetName
+  files: IconFileReport[]
+  workspace: { name: string; text: string }[]
 }
 
 export interface PlannedFile {
@@ -144,6 +187,9 @@ export const api = {
   saveMappings: (mappings: Record<string, string>) => call<TopologySummary>('PUT', '/topology/mappings', { mappings }),
   importCss: (path: string) => call<TopologySummary>('POST', '/topology/import', { path }),
   preview: (target: TargetName, refresh = false) => call<PreviewData>('GET', `/topology/preview?target=${target}${refresh ? '&refresh=1' : ''}`),
+  icons: (target: TargetName, refresh = false) => call<IconsInfo>('GET', `/topology/icons?target=${target}${refresh ? '&refresh=1' : ''}`),
+  repairIcon: (target: TargetName, name: string) => call<IconsInfo>('POST', '/topology/icons/repair', { target, name }),
+  removeIconCopy: (target: TargetName, name: string) => call<IconsInfo>('POST', '/topology/icons/remove', { target, name }),
   topologyState: (target: TargetName) => call<TopologyState>('GET', `/topology/state?target=${target}`),
   topologyPlan: (target: TargetName) => call<PlannedFile[]>('GET', `/topology/plan?target=${target}`),
   applyTopology: (target: TargetName) => call<ApplyRecord>('POST', '/topology/apply', { target, confirm: target === 'prod' ? 'production' : undefined }),

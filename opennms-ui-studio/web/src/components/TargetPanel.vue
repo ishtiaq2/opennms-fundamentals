@@ -28,7 +28,7 @@
         </p>
         <p v-if="target === 'prod' && f.ownedByOpenNMS && f.overlays.length" class="upgrade">
           This is a file of OpenNMS itself. Before you upgrade OpenNMS (a new image), remove its overlay copy: at every start the
-          copy replaces the file of the new version. Then apply your labels to the new version again.
+          copy replaces the file of the new version. Then apply your changes to the new version again.
         </p>
         <DiffBlock :diff="f.diff" :excerpt="f.excerpt" />
       </article>

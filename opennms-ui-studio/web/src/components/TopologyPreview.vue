@@ -22,12 +22,44 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ select: [key: string] }>()
 
+/** What one selector of your CSS reaches in the preview (preview-frame.html: reachOfRules) */
+export interface RuleReach {
+  rule: number
+  selector: string
+  /** elements of the page that match */
+  matched: number
+  /** of them: shapes of an icon drawing (they sit in <defs>; nodes show copies) */
+  shapes: number
+  /** ids of the groups those shapes are in */
+  groups: string[]
+  /** how many nodes show those shapes: as the normal look, under the mouse, when selected */
+  up: number
+  over: number
+  active: number
+  /** shapes covered by a later shape with the same outline in the same drawing, and the groups that cover them */
+  hidden: number
+  hiddenBy: string[]
+  /** a pseudo-element or a state such as :hover: it matches only sometimes, so a count of 0 says nothing */
+  dynamic: boolean
+  invalid: boolean
+}
+
+export interface PartsOfGroup {
+  id: string
+  found: boolean
+  parts: { cls: string; count: number; fill: string }[]
+  unclassed: number
+}
+
 interface PreviewApi {
   load(d: { stockCss: string; svgFiles: { name: string; text: string }[] }): void
   setCss(css: string): void
   draw(nodes: PreviewNode[], edges: { source: string; target: string }[]): void
   inspect(key: string): unknown
   rulesUnderstood(): number
+  rules(): RuleReach[]
+  partsOf(ids: string[]): PartsOfGroup[]
+  skipped(): { name: string; error: string }[]
 }
 
 const frame = ref<HTMLIFrameElement>()
@@ -76,6 +108,9 @@ watch(() => [props.nodes, props.edges], () => render(false), { deep: true })
 defineExpose({
   inspect: (key: string) => win()?.inspect(key) ?? null,
   rulesUnderstood: () => win()?.rulesUnderstood() ?? 0,
+  rules: (): RuleReach[] => win()?.rules() ?? [],
+  partsOf: (ids: string[]): PartsOfGroup[] => win()?.partsOf(ids) ?? [],
+  skipped: () => win()?.skipped() ?? [],
 })
 </script>
 

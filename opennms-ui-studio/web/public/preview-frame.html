@@ -33,6 +33,7 @@
       var NS = 'http://www.w3.org/2000/svg';
       var XL = 'http://www.w3.org/1999/xlink';
       var userStyle = null;
+      var skippedFiles = [];
       var current = { nodes: [], edges: [] };
 
       function el(tag, attrs, parent) {
@@ -74,15 +75,162 @@
         overlay.addEventListener('click', function () { tell({ type: 'select', key: v.key }); });
       }
 
+      // ---- What the rules reach -------------------------------------------------------------------------------------
+      var SHAPES = /^(path|rect|circle|ellipse|polygon|polyline|line|text|image|use|g)$/;
+      var GEOMETRY = ['d', 'points', 'x', 'y', 'width', 'height', 'cx', 'cy', 'r', 'rx', 'ry', 'x1', 'y1', 'x2', 'y2'];
+
+      // The selectors of a rule, split at the commas that are not inside (), [] or quotes.
+      function splitSelectors(text) {
+        var out = [], depth = 0, quote = '', cur = '';
+        for (var i = 0; i < text.length; i++) {
+          var ch = text.charAt(i);
+          if (quote) { cur += ch; if (ch === '\\') cur += text.charAt(++i); else if (ch === quote) quote = ''; continue; }
+          if (ch === '"' || ch === "'") { quote = ch; cur += ch; continue; }
+          if (ch === '(' || ch === '[') depth++;
+          if (ch === ')' || ch === ']') depth--;
+          if (ch === ',' && depth === 0) { out.push(cur.trim()); cur = ''; continue; }
+          cur += ch;
+        }
+        if (cur.trim()) out.push(cur.trim());
+        return out;
+      }
+
+      // The style rules of a sheet, also inside @media, @supports and @layer blocks.
+      function styleRules(list, out) {
+        for (var i = 0; i < list.length; i++) {
+          var r = list[i];
+          if (r.selectorText !== undefined) out.push(r);
+          else if (r.cssRules) styleRules(r.cssRules, out);
+        }
+        return out;
+      }
+
+      function hexOf(color) {
+        var m = /^rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(color || '');
+        if (!m) return color || '';
+        return '#' + [m[1], m[2], m[3]].map(function (n) { return ('0' + Number(n).toString(16)).slice(-2); }).join('');
+      }
+
+      function opaque(el) {
+        var cs = getComputedStyle(el);
+        return cs.fill !== 'none' && !/rgba\(.*,\s*0\)$/.test(cs.fill) && parseFloat(cs.fillOpacity) === 1 && parseFloat(cs.opacity) === 1 && cs.display !== 'none' && cs.visibility !== 'hidden';
+      }
+
+      // Where a shape is drawn, so that two shapes with the same signature lie on the same spot.
+      function signature(el, top) {
+        var s = el.tagName;
+        GEOMETRY.forEach(function (a) { var v = el.getAttribute(a); if (v !== null) s += '|' + a + '=' + v; });
+        for (var p = el; p && p !== top; p = p.parentNode) { var t = p.getAttribute && p.getAttribute('transform'); if (t) s += '|t=' + t; }
+        return s;
+      }
+
+      function nearestId(el, top) {
+        for (var p = el; p && p !== top.parentNode; p = p.parentNode) if (p.id) return p.id;
+        return top.id;
+      }
+
+      var coverCache = null;
+      // The shapes of one drawing (the element a node's <use> points to), in the order they are drawn, by signature.
+      function shapesOf(top) {
+        if (coverCache[top.id]) return coverCache[top.id];
+        var all = top.querySelectorAll('*'), by = {}, order = new Map();
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i];
+          if (!SHAPES.test(el.tagName) || el.tagName === 'g') continue;
+          var sig = signature(el, top);
+          (by[sig] = by[sig] || []).push(el);
+          order.set(el, i);
+        }
+        return (coverCache[top.id] = { by: by, order: order });
+      }
+
+      function reachOfRules() {
+        var sheet = userStyle && userStyle.sheet;
+        if (!sheet) return [];
+        coverCache = {};
+        var defs = document.querySelector('defs');
+        // Which drawings do the nodes of this view show, and how many nodes show each?
+        var used = {};
+        document.querySelectorAll('g.vertex use').forEach(function (u) {
+          var ref = (u.getAttributeNS(XL, 'href') || u.getAttribute('href') || '').replace(/^#/, '');
+          var kind = u.getAttribute('class') === 'overIcon' ? 'over' : u.getAttribute('class') === 'activeIcon' ? 'active' : 'up';
+          if (!ref) return;
+          used[ref] = used[ref] || { up: 0, over: 0, active: 0 };
+          used[ref][kind]++;
+        });
+        var out = [];
+        styleRules(sheet.cssRules, []).forEach(function (rule, index) {
+          splitSelectors(rule.selectorText).forEach(function (selector) {
+            var res = { rule: index, selector: selector, matched: 0, shapes: 0, groups: [], up: 0, over: 0, active: 0, hidden: 0, hiddenBy: [], dynamic: false, invalid: false };
+            res.dynamic = /::|:hover|:active|:focus|:visited|:target/.test(selector);
+            var found;
+            try { found = document.querySelectorAll(selector.replace(/::[\w-]+(\([^)]*\))?/g, '')); } catch (e) { res.invalid = true; out.push(res); return; }
+            res.matched = found.length;
+            var reached = {};
+            for (var i = 0; i < found.length; i++) {
+              var el = found[i];
+              if (!defs.contains(el) || !SHAPES.test(el.tagName)) continue;
+              res.shapes++;
+              var group = null;
+              for (var p = el; p && p !== defs; p = p.parentNode) {
+                if (p.id && !group && p.tagName === 'g') group = p.id;
+                if (p.id && used[p.id]) reached[p.id] = true;
+              }
+              if (group && res.groups.indexOf(group) < 0) res.groups.push(group);
+              // Hidden: in a drawing that a node shows as its normal look, a later shape with the same outline and an opaque fill lies over it.
+              // The one on top is the one that is seen (the shapes between it and this one are covered, too), so look from the end.
+              for (var q = el.parentNode; q && q !== defs; q = q.parentNode) {
+                if (!q.id || !used[q.id] || !used[q.id].up || el.tagName === 'g') continue;
+                var info = shapesOf(q), mine = info.by[signature(el, q)] || [], at = info.order.get(el);
+                for (var k = mine.length - 1; k >= 0 && info.order.get(mine[k]) > at; k--) {
+                  if (opaque(mine[k])) { res.hidden++; var by = nearestId(mine[k], q); if (res.hiddenBy.indexOf(by) < 0) res.hiddenBy.push(by); break; }
+                }
+                break;
+              }
+            }
+            Object.keys(reached).forEach(function (id) { res.up += used[id].up; res.over += used[id].over; res.active += used[id].active; });
+            out.push(res);
+          });
+        });
+        return out;
+      }
+
+      // The classes of the shapes inside one group, with a colour each: { id, found, parts: [{ cls, count, fill }], unclassed }
+      function partsOfGroup(id) {
+        var top = document.getElementById(id);
+        if (!top) return { id: id, found: false, parts: [], unclassed: 0 };
+        var tally = {}, order = [], unclassed = 0;
+        top.querySelectorAll('*').forEach(function (el) {
+          if (!SHAPES.test(el.tagName) || el.tagName === 'g') return;
+          var classes = (el.getAttribute('class') || '').split(/\s+/).filter(Boolean);
+          if (!classes.length) { unclassed++; return; }
+          var fill = hexOf(getComputedStyle(el).fill);
+          classes.forEach(function (c) {
+            if (!tally[c]) { tally[c] = { cls: c, count: 0, fills: {} }; order.push(c); }
+            tally[c].count++;
+            tally[c].fills[fill] = (tally[c].fills[fill] || 0) + 1;
+          });
+        });
+        return {
+          id: id, found: true, unclassed: unclassed,
+          parts: order.map(function (c) {
+            var fills = tally[c].fills, best = Object.keys(fills).sort(function (a, b) { return fills[b] - fills[a]; })[0];
+            return { cls: c, count: tally[c].count, fill: best };
+          }),
+        };
+      }
+
       window.preview = {
         // The stock stylesheet and the svg files of an OpenNMS.
         load: function (data) {
           document.getElementById('stock').textContent = data.stockCss || '';
           var defs = document.querySelector('defs');
           while (defs.firstChild) defs.removeChild(defs.firstChild);
+          skippedFiles = [];
           (data.svgFiles || []).forEach(function (f) {
             var doc = new DOMParser().parseFromString(f.text, 'image/svg+xml');
-            if (doc.getElementsByTagName('parsererror').length) return; // OpenNMS skips a file it cannot read, too
+            var bad = doc.getElementsByTagName('parsererror');
+            if (bad.length) { skippedFiles.push({ name: f.name, error: (bad[0].textContent || '').trim().split('\n')[0] }); return; } // OpenNMS skips a file it cannot read, too
             defs.appendChild(document.importNode(doc.documentElement, true));
           });
           var holder = el('svg', { width: 0, height: 0 }, defs);
@@ -140,6 +288,14 @@
         rulesUnderstood: function () {
           return userStyle && userStyle.sheet ? userStyle.sheet.cssRules.length : 0;
         },
+        // What each selector of your CSS reaches in this page: how many elements, and for the parts of an icon drawing
+        // (they sit in <defs>, and every node shows a copy of them): which nodes show them, and whether a later copy of the
+        // same outline lies over them (a drawing that holds its own rollover and active layers hides all but the last).
+        rules: function () { return reachOfRules(); },
+        // The classes used by the shapes of some drawings, with the colour the browser gives them: for rules to start from.
+        partsOf: function (ids) { return ids.map(partsOfGroup); },
+        // Files OpenNMS cannot read (not well-formed XML): the preview skips them, as OpenNMS does.
+        skipped: function () { return skippedFiles.slice(); },
       };
       tell({ type: 'ready' });
     </script>
