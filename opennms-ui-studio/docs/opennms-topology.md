@@ -148,6 +148,9 @@ where the drawing sets nothing itself (inheritance). CSS variables pass into the
 `svg .vertex:has(> rect.status.critical) { --alarm: #CC0000; }` together with `#X .cls-1 { fill: var(--alarm, #1F3A5F); }`
 paints the part red on nodes with a critical alarm.
 
+What the copy holds depends on how the file is built: `<use href="#X">` draws everything inside X, deep or not. A file
+that keeps its three looks inside X is the usual reason why a rule for the parts of an icon seems to do nothing (4.1).
+
 ### 3.6 Seeing it in a browser
 
 On the real page: F12 > Elements, select a `rect.status`. The Styles pane lists the rules that match it, the winner
@@ -190,12 +193,82 @@ studio's next apply adds its block again at the end, which wins over the plain l
 removed in the studio stays as a plain line in that case: remove it in OpenNMS (right-click the node > Reset Icon,
 which saves the file the same way) or from the file.
 
+### 4.1 What an icon file must look like
+
+A node draws `<use href="#X">`, and a `<use>` draws **everything inside the element with the id X**, however deep.
+OpenNMS asks the page for three ids and no others: `#X` (the normal look, `use.upIcon`), `#X_rollover` (the mouse is
+over the node, `use.overIcon`) and `#X_active` (the node is selected, `use.activeIcon`; `GWTVertex.create()`, part 6).
+It never draws `#X_default`, and it does not look at the file as a whole. The stock files therefore put the three looks
+next to each other, in a wrapper that nothing draws:
+
+```xml
+<g id="X_icon">                   the wrapper: no <use> points to it
+  <g id="X"> ... </g>             the normal look
+  <g id="X_rollover"> ... </g>    the mouse is over the node
+  <g id="X_active"> ... </g>      the node is selected
+</g>
+```
+
+A drawing program easily exports another layout: a group `X` that holds three groups `X_default`, `X_rollover` and
+`X_active`. In a viewer the file looks right. In OpenNMS `<use href="#X">` draws all three, one over the other, and the
+one that comes last in the file, `X_active`, lies on top. The node shows the look of the selected state all the time,
+and a rule for the normal look, `#X_default .cls-1 { fill: red; }`, colours a layer that is covered. That was the
+`nimbus` icon of production: `nimbus.svg` holds three looks of 137 shapes each, the nodes were light blue (`#beccdc`,
+the colour of `_active`) and `#nimbus_default .cls-1, #nimbus_default .cls-2, #nimbus_default .cls-3 { fill: red !important; }`
+changed nothing. Counted in Chromium, in a page built the way OpenNMS builds it (the file whole in `<defs>`, a node is a
+`<use>`), as the share of the pixels that are not white:
+
+| The node `nimbus`, drawn from | What is seen |
+|---|---|
+| the file as it is, no CSS | `#beccdc` 88 % |
+| the file as it is, `#nimbus_default .cls-N { fill: red !important; }` | `#beccdc` 86 %, red 0 % |
+| the file as it is, `#nimbus_rollover .rollover-cls-N { fill: red !important; }` | red 0 % |
+| the file as it is, `#nimbus_active .active-cls-N { fill: red !important; }` | red 87 % |
+| the same file for a node whose icon id is `nimbus_default` (it draws the one group), no CSS | `#e6e7e8` 69 %, `#bcbec0` 21 % |
+| the file with two ids renamed (below), no CSS | `#e6e7e8` 69 %, `#bcbec0` 21 %: the grey the file's author drew for the normal look |
+| the repaired file, `#nimbus .cls-N { fill: red; }` (`!important` is not needed) | red 87 % |
+| the repaired file, red rule, the mouse over the node / the node selected | `#5dc3ad` 85 % / `#beccdc` 85 %: the other two looks are drawings of their own now |
+
+(The class names differ per layer: `cls-N`, `rollover-cls-N`, `active-cls-N`; that is what Illustrator makes.)
+
+**The repair** is two renames, in this order, and nothing else: the group that holds the three (`id="nimbus"`)
+becomes `nimbus_icon`, and `nimbus_default` becomes `nimbus`. In the nimbus.svg of production these are two lines of
+the file (20 and 22). The nodes then change: from the light blue of the selected look to the grey of the normal look,
+which is the look the file was drawn with.
+
+Without touching the file, a rule for the layer on top works: `#nimbus_active .active-cls-1 { fill: ... }` and so on.
+It colours the normal look and the selected look together, because both draw `#nimbus_active` (red 87 % and 89 %). The
+look under the mouse is `#nimbus_rollover` drawn on its own: it keeps its green (`#5dc3ad`, 85 %) until you colour that
+group as well (then red 92 %). The studio's list of snippets writes these rules for the icon you clicked (*The parts of
+the icon you clicked*).
+
+OpenNMS does not tell you any of this: a file with a wrong layout loads without a message. The studio's *Icon files*
+box does (part 5).
+
 ## Part 5: What the studio changes on the topology page
 
 | Your file (`workspace/`) | The OpenNMS file | How it is made | When the page shows it |
 |---|---|---|---|
 | `topology/topology.css` | `jetty-webapps/opennms/svg/zz-topology-styles.svg` | your CSS, byte for byte, between `<style><![CDATA[` and `]]></style>` in an empty svg (a `]]>` in your CSS is split so that the CDATA stays whole; a line `/* mark */` adds the rule of the yellow label) | first time: a new tab; then: a reload |
 | `topology/icon-mappings.json` | `etc/org.opennms.features.topology.app.icons.default.cfg` | the studio's block at the end of the file (part 4), the rest of the file unchanged | a reload |
+| `topology/icons/<name>.svg` (only the ones you made) | `jetty-webapps/opennms/svg/<name>.svg` | your copy of an icon file, byte for byte, sent when it differs from the file in that OpenNMS | a reload; a file that is new to that OpenNMS: a new tab |
+
+**Icon files.** Under the preview the box *Icon files* lists every svg file of the OpenNMS you preview, the icons it
+holds, and what is wrong with the way each is built (`server/src/util/iconcheck.ts`, part 4.1). It reports as an error:
+a group `X` that holds `X_default`, `X_rollover` and `X_active` (they are drawn on top of each other), a group
+`X_default` without an `X` (no node draws it), a wrapper `X_icon` without an `X`; and as a note: an `X_default` next to
+an `X` (never drawn), a missing `X_rollover` or `X_active` (the node keeps the normal look), a file with no icon and no
+`<style>`. The stock files `opennms_icons.svg`, `atlas_icons.svg`, `vmware_icons.svg` and `legacy_icons.svg` belong to
+OpenNMS and are not checked; a file that is not well-formed XML is listed as skipped (the page of OpenNMS skips it, too).
+
+*Make a repaired copy in the workspace* writes `topology/icons/<name>.svg`: the file of that OpenNMS with the two
+renames of 4.1 and nothing else (byte order mark and line ends are kept). It makes no copy when a rename would not be
+safe, for example when something in the file refers to one of the ids (a rule in its `<style>`, a `<use>`): then the box
+says what to change by hand. The preview then draws the copy, and the dev and production panels list `svg/<name>.svg`
+with a diff of the two lines. *Apply* sends it like the CSS: it keeps the old file in `backups/`, writes the file into
+the container (on production also into an overlay folder, by the rules of docs/how-the-studio-works.md, section 4),
+checks the md5 sum, and asks the web server for it; *Undo* puts the old file back. *Remove my copy* deletes the copy
+from the workspace: the studio stops sending it, and OpenNMS keeps the file it has until you apply a different one.
 
 The style file is the same, byte for byte, as the one `kit/topo.sh` makes, so `kit/topo.sh css prod` and the studio
 agree on whether production has your CSS (a unit test checks it). The name begins with `zz-` so that it comes last in a
@@ -216,7 +289,7 @@ All at https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/ followed by the
 | [`.../internal/support/IconRepositoryManager.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/support/IconRepositoryManager.java) | `getSVGIconId` (lines 122 and 133): the order of part 4; `getSVGIconFiles` (line 160): the folder listing; `setIconMapping` (line 94): Change Icon |
 | [`.../internal/gwt/client/VTopologyComponent.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/gwt/client/VTopologyComponent.java) | `injectSVGDefs` (line 706) |
 | [`.../internal/gwt/client/d3/D3.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/gwt/client/d3/D3.java) | `injectSVGDef` (line 458): `d3.xml`, then `appendChild` to the first `<defs>` |
-| [`.../internal/gwt/client/GWTVertex.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/gwt/client/GWTVertex.java) | `create()` (line 530): the elements of a node; `draw()` (line 495): sizes and classes |
+| [`.../internal/gwt/client/GWTVertex.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/gwt/client/GWTVertex.java) | `create()` (line 530): the elements of a node, among them the three `<use>` (`upIcon`, `overIcon`, `activeIcon`); `draw()` (line 495): sizes and classes |
 | [`.../internal/gwt/client/GWTEdge.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/java/org/opennms/features/topology/app/internal/gwt/client/GWTEdge.java) | line 118: the inline `stroke-width: 3px` |
 | [`features/topology-map/org.opennms.features.topology.api/src/main/java/org/opennms/features/topology/api/support/DefaultIconRepository.java`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.api/src/main/java/org/opennms/features/topology/api/support/DefaultIconRepository.java) | `updated()` (line 87): Karaf hands over the cfg file; `save()` (line 71): Change Icon rewrites it |
 | [`features/topology-map/org.opennms.features.topology.app/src/main/resources/OSGI-INF/blueprint/blueprint.xml`](https://github.com/OpenNMS/opennms/blob/opennms-33.1.8-1/features/topology-map/org.opennms.features.topology.app/src/main/resources/OSGI-INF/blueprint/blueprint.xml) | lines 114 to 124: the default icon repository and its pid |

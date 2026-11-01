@@ -93,8 +93,17 @@ apply or an undo every check is.
 4. **Write.** Each file into the container; on production also each overlay copy, through the container's mount of
    that folder (so the studio needs no rights on the host folder itself).
 5. **Check.** The md5 sum of each written file must equal the md5 sum of what was sent; then the module's checks (the
-   web server sends the new style file, the bundles, `/navBar.htm` and `/api/v2/menu` show the new words).
+   web server sends the new style file, the bundles, `/navBar.htm` and `/api/v2/menu` show the new words, and for each
+   icon file of yours that the web server sends it as your copy: *OpenNMS serves svg/nimbus.svg (your copy)*).
 6. **Record.** One line in `backups/journal.jsonl`.
+
+The topology apply writes the style file, the mapping file when your mappings changed, and one file for each copy in
+`workspace/topology/icons/` that differs from the file in that OpenNMS (it compares md5 sums; a copy that is the same
+as the file there is not sent again). Each is a line of the plan with its diff, kept in the backup and put back by Undo
+like the others. The name `zz-topology-styles...` is the style file's and cannot be a copy. A copy named like one of
+OpenNMS's own icon files (`opennms_icons.svg`, `atlas_icons.svg`, `vmware_icons.svg`, `legacy_icons.svg`) is sent as well,
+and the plan marks it as a file of OpenNMS itself: on production its overlay copy replaces the file of a new OpenNMS
+version at every start, so remove it before an upgrade (README.md, section 9). The icon check does not look at these files.
 
 ```
 backups/
@@ -174,6 +183,7 @@ commit). It holds your files only, never OpenNMS's:
 workspace/
   topology/topology.css         your CSS
   topology/icon-mappings.json   {"<namespace>.<node id>": "<icon id>"}
+  topology/icons/<name>.svg     your copies of icon files (only when you made one: Topology > Icon files)
   menu/labels.json              {"plugins": "Tools", "menuNames": {"maps.htm#1": "Network Maps"}}
   README.md                     what each file becomes in OpenNMS
   .gitignore                    *.bak (the copies kit/topo.sh revert keeps)
@@ -214,6 +224,9 @@ curl -s -H "x-studio-token: $T" -H 'Content-Type: application/json' -d '{"target
 | `PUT /api/topology/mappings` `{"mappings": {...}}` | saves `topology/icon-mappings.json` |
 | `POST /api/topology/import` `{"path": "~/....css"}` | copies a CSS file of this machine into `topology/topology.css` |
 | `GET /api/topology/preview?target=dev` | the files the preview needs from that OpenNMS: svg files, views, mapping files, the stock stylesheet (kept for 2 minutes; `&refresh=1` reads again) |
+| `GET /api/topology/icons?target=dev` | the check of every svg file of that OpenNMS (the icons each holds, the problems, the repair that would be made), your copies in `topology/icons/` next to them, and the text of each copy (`&refresh=1` reads the files again) |
+| `POST /api/topology/icons/repair` `{"target": "dev", "name": "nimbus.svg"}` | writes the repaired copy `topology/icons/nimbus.svg`: the file of that OpenNMS with the two renames (or your copy, when it has the flaw); nothing is sent to OpenNMS |
+| `POST /api/topology/icons/remove` `{"target": "dev", "name": "nimbus.svg"}` | deletes your copy from the workspace |
 | `GET /api/topology/state?target=prod` | what that OpenNMS has: the style file in the container, served, in the overlay folder; mappings up to date |
 | `GET /api/topology/plan?target=` | the files an apply would write, with differences and overlay copies |
 | `POST /api/topology/apply` `{"target": "prod", "confirm": "production"}` | applies (production needs the confirm) |
