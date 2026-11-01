@@ -9,7 +9,7 @@ It has two modules:
 
 | Module | What you change | The OpenNMS files it writes (below `/usr/share/opennms` in the container) |
 |---|---|---|
-| **Topology** | the look of `/opennms/topology` (the background behind the icons, frames, labels, links, sizes) and the icon of each node | `jetty-webapps/opennms/svg/zz-topology-styles.svg`, `etc/org.opennms.features.topology.app.icons.default.cfg` |
+| **Topology** | the look of `/opennms/topology` (the background behind the icons, frames, labels, links, sizes), the icon of each node, and the svg files of the icons themselves (checked, and repaired on request) | `jetty-webapps/opennms/svg/zz-topology-styles.svg`, `etc/org.opennms.features.topology.app.icons.default.cfg`, and a repaired `jetty-webapps/opennms/svg/<icon file>.svg` |
 | **Menu bar** | the words of the bar at the top of every page: the Plugins menu (for example "Tools") in both bars, and the menu names of `dispatcher-servlet.xml` | `jetty-webapps/opennms/WEB-INF/templates/navbar.ftl`, `jetty-webapps/opennms/ui/assets/index-<hash>.js`, `jetty-webapps/opennms/WEB-INF/dispatcher-servlet.xml` |
 
 **GUIDE.md** is the step-by-step course: setup, then experiments with both modules, and how to track them.
@@ -18,6 +18,8 @@ It has two modules:
 - `docs/opennms-topology.md`: how OpenNMS builds `/opennms/topology`, which rule of CSS wins and why, how a node gets its icon;
 - `docs/opennms-menu.md`: the two programs that draw the menu bar, every word of it and the file it comes from;
 - `docs/how-the-studio-works.md`: every command the studio runs, an apply step by step, backups, overlay folders, the API.
+
+**CHANGES.md** lists what each version added.
 
 ```
    your browser (any computer)
@@ -68,6 +70,20 @@ npm test               # optional: the unit tests (about 1 second)
 sudo firewall-cmd --permanent --add-port=8990/tcp && sudo firewall-cmd --reload
 ```
 
+**Updating from 1.0.0 to 1.1.0.** The update `opennms-ui-studio-1.1.0-update.tar.gz` holds only the files that changed
+(CHANGES.md lists them). Stop the studio (Ctrl+C), then on the development machine:
+
+```bash
+cd ~/opennms-fundamentals
+tar xzf ~/opennms-ui-studio-1.1.0-update.tar.gz       # unpacks into opennms-ui-studio/, over your files; workspace/ is not touched
+cd opennms-ui-studio
+npm run build                                           # no npm install needed: no package was added
+npm test                                                # optional: 21 tests
+npm start
+```
+
+Your workspace, your history and `backups/` stay as they are. Reload the page of the studio afterwards (Ctrl+F5).
+
 The settings of OpenNMS are in `kit/kit.env` (production `maven-admin@192.168.0.36`, container `opennms`,
 `http://192.168.0.36:8980/opennms`; dev container `onms-dev-core`, port 8980, login admin/admin). Change them there
 if yours differ. `studio.env` holds the studio's port (8990).
@@ -105,7 +121,10 @@ container again (its database stays). Leave the old kit folder alone afterwards:
 
 1. **Preview.** Topology: edit the CSS on the left, the preview on the right redraws as you type. Click a node to
    see why it has its icon, give it another one, and see the colours your CSS gives it. Menu bar: type your word,
-   both bars show it at once. OpenNMS does not change.
+   both bars show it at once. OpenNMS does not change. Under the topology editor, *What your rules reach in this
+   preview* says what each selector of yours selects, and whether another shape covers it; under the preview, *Icon files*
+   checks the svg files of that OpenNMS (a file whose three looks lie on top of each other makes rules for its parts do
+   nothing) and can make a repaired copy, which an apply sends like your CSS.
 2. **Apply to the development OpenNMS.** The panel *Development OpenNMS* lists the files an apply writes, with their
    difference (a unified diff, or the text around the change for a compiled JavaScript file). *Apply* writes them into
    the container `onms-dev-core` (`podman exec -i onms-dev-core sh -c '... cat > <file>'`), checks the md5 sum of each
@@ -127,6 +146,7 @@ state lines) are left out. It is the best way to see what really happens.
 workspace/                         a git repository: your work
   topology/topology.css            your CSS for the topology page
   topology/icon-mappings.json      {"<namespace>.<node id>": "<icon id>"}
+  topology/icons/<name>.svg        your copies of icon files, for example a repaired nimbus.svg (only when you made one)
   menu/labels.json                 {"plugins": "Tools", "menuNames": {"maps.htm#1": "Network Maps"}}
   README.md                        what each file becomes in OpenNMS
 backups/                           one folder per apply: the files it replaced; journal.jsonl lists every apply
@@ -142,7 +162,7 @@ the studio notices changes to the files.
 
 | Folder | What it is |
 |---|---|
-| `server/` | the server, TypeScript on Node.js, without runtime packages: `src/target.ts` (the commands for dev and production), `src/overlay.ts` (which overlay folder takes a file), `src/changes.ts` (apply, backups, undo), `src/history.ts` (git), `src/modules/topology.ts`, `src/modules/menu.ts`; `test/` its unit tests; `assets/` the stock topology stylesheet and the workspace README |
+| `server/` | the server, TypeScript on Node.js, without runtime packages: `src/target.ts` (the commands for dev and production), `src/overlay.ts` (which overlay folder takes a file), `src/changes.ts` (apply, backups, undo), `src/history.ts` (git), `src/modules/topology.ts`, `src/modules/menu.ts`, `src/util/iconcheck.ts` (the check of the icon files); `test/` its unit tests; `assets/` the stock topology stylesheet and the workspace README |
 | `web/` | the page: Vue 3, TypeScript, Vite. `src/views/` one file per page, `src/components/` the preview of the topology (`public/preview-frame.html`, built like the real page), the preview of the bars, the panels that apply |
 | `kit/` | the topology kit 3.11: `dev.sh` (the development OpenNMS), `topo.sh` (command line tools: `css prod`, `persist`, `export`, `view show`, `pagecheck`, ...) and its guides |
 | `docs/` | how OpenNMS builds the topology page and the menu bars, and how the studio works |
@@ -197,6 +217,7 @@ The unit expects the studio in `~/opennms-fundamentals/opennms-ui-studio` (chang
 | the dev page still shows the old look | the tab keeps its files, or OpenNMS was restarted from older overlay copies | open the page in a new tab; Topology/Menu > *Read again* shows what dev has; apply again |
 | a new menu name shows in the Vue bar, not in the JSP bar | the JSP bar reads `dispatcher-servlet.xml` when OpenNMS starts | Menu bar > *Restart the development OpenNMS* (production: at your next restart) |
 | *Wait: ... is running* | another apply, undo or restart is running | wait for it (the command log shows it) |
+| a rule for the parts of an icon changes nothing | another layer of the icon lies over the shapes the rule colours | Topology > *What your rules reach*, and *Icon files*: GUIDE.md, Experiment T8 |
 | `npm install` fails | no internet, or a proxy | set `npm config set proxy http://...` or install on a machine with internet and copy the folder with `node_modules/` |
 
 ## 11. Sources

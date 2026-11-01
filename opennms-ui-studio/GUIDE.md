@@ -40,8 +40,12 @@ tar xzf ~/opennms-ui-studio-1.0.0.tar.gz
 cd opennms-ui-studio
 npm install        # once: Vue, Vite and TypeScript into node_modules/
 npm run build      # server/dist and web/dist
-npm test           # 14 tests, all "ok"
+npm test           # 21 tests, all "ok"
 ```
+
+Version 1.1.0 (the *Icon files* check, experiment T8) came as an update that holds only the files that changed:
+`tar xzf ~/opennms-ui-studio-1.1.0-update.tar.gz -C ~/opennms-fundamentals`, then `npm run build` in the studio folder
+and a restart of the studio (README.md, section 2). A new installation with that update on top of 1.0.0 is the same.
 
 `npm test` checks the parts that touch OpenNMS files against the real OpenNMS 33.1.8 files: that the style file is
 byte for byte what the topology kit makes, that the Plugins label is found in Menubar.vue compiled four different
@@ -87,8 +91,9 @@ docs/opennms-topology.md tells how OpenNMS builds the real page; this part lets 
 Open **Topology**. Left: your CSS (`workspace/topology/topology.css`), saved by itself a moment after you stop typing.
 Right: the preview, built the way OpenNMS builds `/opennms/topology`: the stock stylesheet, every svg file of dev's
 `jetty-webapps/opennms/svg/` in `<defs>`, your CSS as the last of them, and the nodes of a GraphML view of dev, each as
-`<g class="vertex">` with `rect.status`, the icon (`use.upIcon`), the label (`text.vertex-label`). Below: what dev and
-production have now, and the panels that apply.
+`<g class="vertex">` with `rect.status`, the icon (`use.upIcon`), the label (`text.vertex-label`). Below the editor:
+*What your rules reach in this preview*, which says what each rule of yours selects. Below the preview: *Icon files*,
+which checks the svg files of dev, and what dev and production have now, and the panels that apply.
 
 ### Experiment T1: where does the green come from?
 
@@ -189,6 +194,54 @@ podman exec onms-dev-core tail -6 /usr/share/opennms/etc/org.opennms.features.to
 > **The lesson.** On the real page your CSS meets the stock stylesheet and the `<style>` of every other svg file (some
 > icon files bring page-wide rules). Start rules with `svg`, name the classes, and use the inspector (or F12 on the
 > real page) to see which rule wins.
+
+### Experiment T8: a rule for an icon that changes nothing (an icon file with stacked looks)
+
+This is the case of the `nimbus` icon: a rule for its parts was applied, and the nodes stayed as they were. Use any
+icon of dev that the *Icon files* box marks as flawed (production's `nimbus.svg`, if dev has it); the box says what is
+wrong with each file, in words.
+
+1. Open *Icon files*, under the preview. Each svg file of dev is a card with the icons it holds and *fine* or *has a
+   flaw*. For `nimbus.svg` it says that `#nimbus` holds `#nimbus_default`, `#nimbus_rollover` and `#nimbus_active`, so
+   a node draws all three one over the other, and the last one, `#nimbus_active`, is on top.
+2. In the editor write the rule you would write first:
+   `#nimbus_default .cls-1, #nimbus_default .cls-2, #nimbus_default .cls-3 { fill: red; }`. Under the editor, *What your
+   rules reach in this preview* opens by itself: for each selector the number of shapes, the nodes that show them, and
+   *all of them lie under a later shape with the same outline, so you do not see this rule*, with the name of the
+   drawing that is on top, `#nimbus_active`. The nodes do not change.
+3. Click a nimbus node. The inspector says that `nimbus.svg` is built so that this icon does not show what its colours
+   say, and links to the box.
+4. In the list above the editor choose *The parts of the icon you clicked (its classes and colours)* and *Insert*. You
+   get one rule for each class of the layer that is on top, with the colour it has now:
+   `#nimbus_active .active-cls-1 { fill: #b3b3b3; }` and so on. Change a colour: the nodes change at once.
+5. Repair the file instead. In the box, *Make a repaired copy in the workspace*. The preview draws your copy (the
+   inspector says so): the nodes show the grey the file's author drew for the normal look, not the light blue of the
+   selected look. The rules for `#nimbus_default` now say *Matches nothing*, because that id is gone: write
+   `#nimbus .cls-1, #nimbus .cls-2, #nimbus .cls-3 { fill: red; }`. Now every nimbus node is red; under the mouse and
+   selected a node keeps the colours of those two groups.
+6. The dev panel lists a second file, `svg/nimbus.svg`, with a diff of two lines. Apply to dev (the checks include
+   *OpenNMS serves svg/nimbus.svg (your copy)*) and open the topology page in a new tab. *Undo the last topology apply*
+   puts the old file back; the box says again that dev's file is flawed and your copy waits.
+
+> **What happened in OpenNMS.** A node is drawn with `<use href="#nimbus">`, and a `<use>` draws everything inside the
+> element with that id. In the file as it was, `#nimbus` was the group that held all three looks, so OpenNMS drew them
+> on top of each other and the last one covered the others; a rule for `#nimbus_default` coloured a covered layer.
+> OpenNMS never draws a group called `nimbus_default` and does not complain about the file. The repair renames two
+> ids, the group that holds the three to `nimbus_icon` and `nimbus_default` to `nimbus`, so that the three looks lie
+> next to each other as in the stock files; then `<use href="#nimbus">` draws only the normal look, `#nimbus_rollover`
+> and `#nimbus_active` are drawn under the mouse and when selected, and a rule for `#nimbus` reaches what you see.
+> docs/opennms-topology.md, part 4.1, has the numbers.
+
+```bash
+podman exec onms-dev-core grep -n 'id="nimbus' /usr/share/opennms/jetty-webapps/opennms/svg/nimbus.svg
+# before: the ids nimbus, nimbus_default, nimbus_rollover, nimbus_active, in this order
+# after the apply: nimbus_icon, nimbus, nimbus_rollover, nimbus_active
+grep -n 'id="nimbus' workspace/topology/icons/nimbus.svg      # your copy, in the workspace (the studio's computer)
+```
+
+> **The lesson.** A rule that matches elements can still change nothing, when another shape lies over them. Look at
+> the drawing (*Icon files*, *What your rules reach*, the inspector) before you assume that the rule is wrong; and
+> start a rule for the parts of an icon with the id of the drawing that is really shown.
 
 ---
 
@@ -364,6 +417,9 @@ Applying keeps the changes in the running container and the overlay folders. For
 5. Apply something to dev, undo it, and prove with `md5sum` that the file in the container is the old one again
    (the journal line has `md5Before`).
 6. Explain to a colleague, with the command log, every command an apply to production ran.
+7. Look at *Icon files* with *Files of: production*. Which files are built like `nimbus.svg`? For one that is fine
+   (`helix.svg` or `orion.svg`), write a rule that gives its normal look another colour and check in *What your rules
+   reach* that the nodes show it. *Hint:* click a node with that icon and insert *The parts of the icon you clicked*.
 
 ---
 
@@ -377,4 +433,7 @@ The table in README.md, section 10, covers the studio. For OpenNMS pages:
 | the plugin page still says the old word | the browser kept the old bundle | reload with F12 > Network > Disable cache ticked |
 | after a restart of dev the old words are back | dev's overlay folders (copies of production's) hold older copies | apply to dev again; `kit/dev.sh up` copies production's overlay folders after a production apply |
 | the studio finds no label in a bundle | another OpenNMS version compiles the bar differently | Experiment M2's commands show the bundle's text; the studio leaves such a file alone |
+| a rule for the parts of an icon (`#x .cls-1`) changes nothing | the rule's shapes are covered by another layer of the same icon (a file that stacks its three looks), or the id or class is not the one of the drawing that is shown | *What your rules reach* says which; *Icon files* says what is wrong with the file; Experiment T8 |
+| *Icon files* lists a file as skipped | the file is not well-formed XML: the page of OpenNMS skips it, too | fix the file (the message gives the first error); the preview and OpenNMS then draw its icons |
+| a repaired copy is in the workspace, but dev's topology page still shows the old look | the copy is in the workspace only until you apply it | Apply to dev, then a new tab |
 | *Not a valid name* | labels are letters, digits, spaces and `. , : ; ! ? ( ) & / + ' -`, at most 40 | they go into a template, a JavaScript string and XML: other characters could break them |
