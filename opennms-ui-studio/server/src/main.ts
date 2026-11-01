@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync, watch } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
 import { extname, join, normalize, resolve } from 'node:path'
-import { applyTopology, previewData, summary, topologyPlan, topologyState, writeCss, writeMappings } from './modules/topology.js'
+import { applyTopology, forgetPreview, iconsInfo, previewData, removeIconCopy, repairIconCopy, summary, topologyPlan, topologyState, writeCss, writeMappings } from './modules/topology.js'
 import { applyMenu, menuPlan, menuState, readLabels, writeLabels, type Labels } from './modules/menu.js'
 import { journal, undoLast } from './changes.js'
 import { loadConfig } from './config.js'
@@ -12,6 +12,7 @@ import { History } from './history.js'
 import { targets, type TargetName } from './target.js'
 
 const config = loadConfig()
+const VERSION = (JSON.parse(readFileSync(join(config.root, 'package.json'), 'utf8')) as { version: string }).version
 const history = new History(config)
 const T = targets(config)
 
@@ -120,7 +121,7 @@ route('GET', '/api/status', async () => {
   const [devUp, prodReach] = await Promise.all([T.dev.running(), T.prod.reachable()])
   const prodUp = prodReach.ok ? await T.prod.running() : false
   return {
-    version: '1.0.0',
+    version: VERSION,
     workspace: { path: config.workspace, branch: await history.branch(), head: await history.head(), changes: (await history.status()).length },
     dev: { container: config.dev.container, url: config.dev.url, port: config.devPort, running: devUp },
     prod: { ssh: config.prodSsh, container: config.prod.container, url: config.prod.url, reachable: prodReach.ok, message: prodReach.message, running: prodUp },
@@ -151,6 +152,29 @@ route('POST', '/api/topology/import', async (req) => {
 route('GET', '/api/topology/preview', async (_req, url) =>
   previewData(config, T[targetOf(url.searchParams.get('target') ?? 'dev')], url.searchParams.get('refresh') === '1'),
 )
+route('GET', '/api/topology/icons', async (_req, url) =>
+  iconsInfo(config, T[targetOf(url.searchParams.get('target') ?? 'dev')], url.searchParams.get('refresh') === '1'),
+)
+route('POST', '/api/topology/icons/repair', async (req) => {
+  const data = await body(req)
+  const target = targetOf(data.target ?? 'dev')
+  try {
+    await repairIconCopy(config, T[target], String(data.name ?? ''))
+  } catch (e) {
+    throw new HttpError(400, (e as Error).message)
+  }
+  return iconsInfo(config, T[target], false)
+})
+route('POST', '/api/topology/icons/remove', async (req) => {
+  const data = await body(req)
+  const target = targetOf(data.target ?? 'dev')
+  try {
+    if (removeIconCopy(config, String(data.name ?? ''))) step('workspace', `Removed workspace/topology/icons/${String(data.name)}: the studio no longer sends it.`)
+  } catch (e) {
+    throw new HttpError(400, (e as Error).message)
+  }
+  return iconsInfo(config, T[target], false)
+})
 route('GET', '/api/topology/state', async (_req, url) => topologyState(config, T[targetOf(url.searchParams.get('target'))]))
 route('GET', '/api/topology/plan', async (_req, url) => topologyPlan(config, T[targetOf(url.searchParams.get('target'))]))
 route('POST', '/api/topology/apply', async (req) => {
@@ -238,7 +262,13 @@ route('POST', '/api/deploys/undo', async (req) => {
   const module = data.module === undefined || data.module === null ? undefined : String(data.module)
   if (module !== undefined && module !== 'topology' && module !== 'menu') throw new HttpError(400, 'module must be topology or menu')
   needConfirm(target, data)
-  return exclusive(`undoing on ${target}`, () => undoLast(config, T[target], module))
+  return exclusive(`undoing on ${target}`, async () => {
+    try {
+      return await undoLast(config, T[target], module)
+    } finally {
+      forgetPreview(target)
+    }
+  })
 })
 
 // ---- Static files of the page -------------------------------------------------------------------------------------

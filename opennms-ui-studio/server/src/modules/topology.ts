@@ -3,21 +3,24 @@
 // Your files (workspace/)                     The OpenNMS file it becomes (below OpenNMS's home)
 //   topology/topology.css              ->     jetty-webapps/opennms/svg/zz-topology-styles.svg
 //   topology/icon-mappings.json        ->     lines in etc/org.opennms.features.topology.app.icons.default.cfg
+//   topology/icons/<name>.svg          ->     jetty-webapps/opennms/svg/<name>.svg     (your copy of an icon file)
 //
 // Why an svg file: OpenNMS puts every file of jetty-webapps/opennms/svg/ into the topology page (inside <defs>),
 // so a <style> in one of them styles the whole page. The studio writes your CSS into such a file, byte for byte as
 // the topology kit (kit/topo.sh) does, so that both tools agree on what production has.
 // Why the cfg file: OpenNMS reads icon mappings (<namespace>.<node id> = <icon id>) from the files
 // etc/org.opennms.features.topology.app.icons.*.cfg, and picks up a changed file within a second.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { StudioConfig } from '../config.js'
 import { applyChanges, type ApplyRecord, type Check, type FileChange } from '../changes.js'
+import { step } from '../events.js'
 import type { History } from '../history.js'
 import { planOverlay } from '../overlay.js'
 import { md5, type Target } from '../target.js'
 import { readZipEntry } from '../util/archive.js'
 import { unifiedDiff } from '../util/diff.js'
+import { checkIconFile, repairIconFile, STOCK_ICON_FILES, validIconFileName, type IconFileCheck, type IconInfo, type IconProblem } from '../util/iconcheck.js'
 
 export const SVG_DIR = 'jetty-webapps/opennms/svg'
 export const STYLE_REL = `${SVG_DIR}/zz-topology-styles.svg`
@@ -29,6 +32,7 @@ const THEME_CSS = 'VAADIN/themes/topo_default/styles.css'
 
 export const cssFile = (config: StudioConfig) => join(config.workspace, 'topology', 'topology.css')
 export const mappingsFile = (config: StudioConfig) => join(config.workspace, 'topology', 'icon-mappings.json')
+export const iconsDir = (config: StudioConfig) => join(config.workspace, 'topology', 'icons')
 
 // ---- The style file -------------------------------------------------------------------------------------------
 
@@ -131,6 +135,37 @@ export function writeMappings(config: StudioConfig, mappings: Record<string, str
   writeFileSync(mappingsFile(config), JSON.stringify(sorted, null, 2) + '\n')
 }
 
+// ---- Your copies of icon files (workspace/topology/icons/<name>.svg) ------------------------------------------------
+
+export interface IconCopy {
+  name: string
+  content: Buffer
+}
+
+/** The icon files in your workspace, by name. A file there goes to jetty-webapps/opennms/svg/ of the OpenNMS you apply to. */
+export function readIconCopies(config: StudioConfig): IconCopy[] {
+  const dir = iconsDir(config)
+  if (!existsSync(dir)) return []
+  return readdirSync(dir)
+    .filter(validIconFileName)
+    .sort()
+    .map((name) => ({ name, content: readFileSync(join(dir, name)) }))
+}
+
+export function writeIconCopy(config: StudioConfig, name: string, content: Buffer | string): void {
+  if (!validIconFileName(name)) throw new Error(`Not a name for an icon file: ${name} (letters, digits, . _ - and the ending .svg; not zz-topology-styles...)`)
+  mkdirSync(iconsDir(config), { recursive: true })
+  writeFileSync(join(iconsDir(config), name), content)
+}
+
+export function removeIconCopy(config: StudioConfig, name: string): boolean {
+  if (!validIconFileName(name)) throw new Error(`Not a name for an icon file: ${name}`)
+  const file = join(iconsDir(config), name)
+  if (!existsSync(file)) return false
+  rmSync(file)
+  return true
+}
+
 export function summary(config: StudioConfig) {
   const css = readCss(config)
   const svg = buildStyleSvg(css)
@@ -138,6 +173,7 @@ export function summary(config: StudioConfig) {
     cssPath: 'workspace/topology/topology.css',
     css: css.toString('utf8'),
     mappings: readMappings(config),
+    iconCopies: readIconCopies(config).map((c) => c.name),
     hasRules: hasRules(css.toString('utf8')),
     mark: markOn(css.toString('utf8')) ? markId(css) : null,
     generated: { rel: STYLE_REL, md5: md5(svg), size: svg.length, text: svg.toString('utf8') },
@@ -158,6 +194,12 @@ export interface PreviewData {
 }
 
 const cache = new Map<string, { at: number; data: PreviewData }>()
+
+/** After an apply or an undo: what the studio read from that OpenNMS is old now. */
+export function forgetPreview(target?: string): void {
+  if (target) cache.delete(target)
+  else cache.clear()
+}
 
 export async function previewData(config: StudioConfig, t: Target, refresh = false): Promise<PreviewData> {
   const hit = cache.get(t.name)
@@ -213,6 +255,12 @@ export async function topologyState(config: StudioConfig, t: Target) {
   for (const c of plan.copies) overlays.push({ onHost: c.onHost, md5: c.exists ? await t.md5Abs(c.inContainer) : null })
   const cfg = await t.read(MAPPING_REL, true)
   const merged = mergeMappings(cfg ? cfg.toString('utf8') : null, readMappings(config))
+  const icons: { name: string; rel: string; same: boolean; present: boolean }[] = []
+  for (const copy of readIconCopies(config)) {
+    const rel = `${SVG_DIR}/${copy.name}`
+    const now = await t.md5Abs(await t.abs(rel))
+    icons.push({ name: copy.name, rel, same: now === md5(copy.content), present: now !== null })
+  }
   return {
     target: t.name,
     where: t.where,
@@ -228,7 +276,66 @@ export async function topologyState(config: StudioConfig, t: Target) {
       overlayNote: plan.note,
     },
     mappings: { rel: MAPPING_REL, upToDate: !!cfg && merged === cfg.toString('utf8') || (!cfg && Object.keys(readMappings(config)).length === 0) },
+    icons,
   }
+}
+
+// ---- The icon files: what is wrong with them, and your repaired copies ------------------------------------------------
+
+export interface IconFileReport extends IconFileCheck {
+  /** The OpenNMS has no file of this name (your copy in the workspace would add it) */
+  missing: boolean
+  /** Your copy in workspace/topology/icons/, if there is one */
+  copy: null | { size: number; md5: string; same: boolean; icons: IconInfo[]; problems: IconProblem[] }
+}
+
+export interface IconsInfo {
+  target: string
+  files: IconFileReport[]
+  /** The text of your copies: the preview uses them in place of the OpenNMS files of the same name */
+  workspace: { name: string; text: string }[]
+}
+
+export async function iconsInfo(config: StudioConfig, t: Target, refresh = false): Promise<IconsInfo> {
+  const data = await previewData(config, t, refresh)
+  const copies = readIconCopies(config)
+  const names = [...new Set([...data.svgFiles.map((f) => f.name), ...copies.map((c) => c.name)])].sort()
+  const files: IconFileReport[] = names.map((name) => {
+    const there = data.svgFiles.find((f) => f.name === name)
+    const copy = copies.find((c) => c.name === name)
+    const check: IconFileCheck = there
+      ? checkIconFile(name, there.text.replace(/^\uFEFF/, ''))
+      : { name, stock: STOCK_ICON_FILES.has(name), hasStyle: false, icons: [], problems: [] }
+    let copyInfo: IconFileReport['copy'] = null
+    if (copy) {
+      const mine = checkIconFile(name, copy.content.toString('utf8').replace(/^\uFEFF/, ''))
+      copyInfo = { size: copy.content.length, md5: md5(copy.content), same: !!there && md5(Buffer.from(there.text)) === md5(copy.content), icons: mine.icons, problems: mine.problems }
+    }
+    return { ...check, missing: !there, copy: copyInfo }
+  })
+  return { target: t.name, files, workspace: copies.map((c) => ({ name: c.name, text: c.content.toString('utf8') })) }
+}
+
+/**
+ * Makes your copy of an icon file with the flaws repaired that can be repaired without guessing (an icon whose
+ * group holds its own rollover and active drawings: two ids change). The source is your copy, or else the file of that
+ * OpenNMS as it is now. Returns what was done.
+ */
+export async function repairIconCopy(config: StudioConfig, t: Target, name: string): Promise<{ applied: string[]; left: string[] }> {
+  if (!validIconFileName(name)) throw new Error(`Not a name for an icon file: ${name}`)
+  const mine = readIconCopies(config).find((c) => c.name === name)
+  const source = mine?.content ?? (await t.read(`${SVG_DIR}/${name}`))
+  if (!source) throw new Error(`${name} is not in ${t.title} and not in workspace/topology/icons/.`)
+  const bom = source.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf]))
+  const text = source.toString('utf8').replace(/^\uFEFF/, '')
+  const repaired = repairIconFile(name, text)
+  if (repaired.applied.length === 0) {
+    const why = checkIconFile(name, text).problems.filter((p) => p.severity === 'error').map((p) => p.noFix ?? p.message)
+    throw new Error(why.length ? `Nothing in ${name} can be repaired without guessing. ${why.join(' ')}` : `${name} has nothing to repair.`)
+  }
+  writeIconCopy(config, name, Buffer.concat([bom ? Buffer.from([0xef, 0xbb, 0xbf]) : Buffer.alloc(0), Buffer.from(repaired.text, 'utf8')]))
+  step('workspace', `Wrote workspace/topology/icons/${name}: ${repaired.applied.map((a) => a.summary).join('; ')}.`)
+  return { applied: repaired.applied.map((a) => a.summary), left: repaired.left.map((p) => p.message) }
 }
 
 // ---- Plan and apply ---------------------------------------------------------------------------------------------
@@ -242,6 +349,8 @@ export interface PlannedFile {
   diff: string
   overlays: string[]
   overlayNote: string
+  /** A file that comes with OpenNMS itself: an upgrade brings a new version of it (the page says what to do then) */
+  ownedByOpenNMS?: boolean
 }
 
 async function changesFor(config: StudioConfig, t: Target): Promise<{ changes: FileChange[]; before: Map<string, Buffer | null> }> {
@@ -256,6 +365,19 @@ async function changesFor(config: StudioConfig, t: Target): Promise<{ changes: F
   const merged = mergeMappings(cfg ? cfg.toString('utf8') : null, readMappings(config))
   if (merged !== (cfg ? cfg.toString('utf8') : '')) {
     changes.push({ rel: MAPPING_REL, content: Buffer.from(merged), why: 'your icon mappings (<namespace>.<node id> = <icon id>), in the block of the studio' })
+  }
+  // Your copies of icon files (workspace/topology/icons/): a file is sent when the OpenNMS has another version of it.
+  for (const copy of readIconCopies(config)) {
+    const rel = `${SVG_DIR}/${copy.name}`
+    const now = await t.read(rel, true)
+    before.set(rel, now)
+    if (!now || md5(now) !== md5(copy.content)) {
+      changes.push({
+        rel,
+        content: copy.content,
+        why: `your copy of ${copy.name} (workspace/topology/icons/${copy.name}); OpenNMS puts every svg file of this folder into the topology page${now ? '' : ' (a new file: open the page in a new browser tab)'}`,
+      })
+    }
   }
   return { changes, before }
 }
@@ -275,6 +397,7 @@ export async function topologyPlan(config: StudioConfig, t: Target): Promise<Pla
       diff: await unifiedDiff(old, c.content, c.rel, `${t.name} now`, 'after the apply'),
       overlays: plan.copies.map((x) => `${x.onHost}${x.exists ? '' : ' (new)'}`),
       overlayNote: plan.note,
+      ownedByOpenNMS: STOCK_ICON_FILES.has(c.rel.slice(c.rel.lastIndexOf('/') + 1)) && c.rel.startsWith(`${SVG_DIR}/`),
     })
   }
   return out
@@ -293,8 +416,23 @@ export async function applyTopology(config: StudioConfig, history: History, t: T
           detail: served.status === 200 ? (md5(served.body) === expected ? `200, the new file; Cache-Control: ${served.headers['cache-control'] ?? 'none'}` : '200, but another text (a proxy or cache in between?)') : `HTTP ${served.status}`,
         }
       : { what: 'OpenNMS serves svg/zz-topology-styles.svg', ok: null, detail: served.error ?? 'no answer' }
-    return [check]
+    const checks: Check[] = [check]
+    for (const c of changes.filter((x) => x.rel.startsWith(`${SVG_DIR}/`) && x.rel !== STYLE_REL)) {
+      const name = c.rel.slice(SVG_DIR.length + 1)
+      const answer = await t.http(`svg/${name}`)
+      checks.push(
+        answer.status
+          ? {
+              what: `OpenNMS serves svg/${name} (your copy)`,
+              ok: answer.status === 200 && md5(answer.body) === md5(c.content),
+              detail: answer.status === 200 ? (md5(answer.body) === md5(c.content) ? `200, the new file; Cache-Control: ${answer.headers['cache-control'] ?? 'none'}` : '200, but another text (a proxy or cache in between?)') : `HTTP ${answer.status}`,
+            }
+          : { what: `OpenNMS serves svg/${name}`, ok: null, detail: answer.error ?? 'no answer' },
+      )
+    }
+    return checks
   })
+  forgetPreview(t.name)
   // The topology kit remembers which style file production has (kit/.kit/prod-style): keep it right.
   if (t.name === 'prod' && existsSync(join(config.kitDir, '.kit'))) writeFileSync(join(config.kitDir, '.kit', 'prod-style'), expected + '\n')
   return record
