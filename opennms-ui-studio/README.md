@@ -70,19 +70,22 @@ npm test               # optional: the unit tests (about 1 second)
 sudo firewall-cmd --permanent --add-port=8990/tcp && sudo firewall-cmd --reload
 ```
 
-**Updating from 1.0.0 to 1.1.0.** The update `opennms-ui-studio-1.1.0-update.tar.gz` holds only the files that changed
-(CHANGES.md lists them). Stop the studio (Ctrl+C), then on the development machine:
+**Updating.** An update archive holds only the files that changed since the version before it (CHANGES.md lists
+them): unpack the updates in order. Stop the studio (Ctrl+C), then on the development machine:
 
 ```bash
 cd ~/opennms-fundamentals
-tar xzf ~/opennms-ui-studio-1.1.0-update.tar.gz       # unpacks into opennms-ui-studio/, over your files; workspace/ is not touched
+tar xzf ~/opennms-ui-studio-1.1.0-update.tar.gz       # 1.0.0 to 1.1.0 (skip it if you have 1.1.0)
+tar xzf ~/opennms-ui-studio-1.2.0-update.tar.gz       # 1.1.0 to 1.2.0: the kit and the guides
 cd opennms-ui-studio
-npm run build                                           # no npm install needed: no package was added
+npm run build                                           # needed after 1.1.0 (1.2.0 changes no code); no npm install
 npm test                                                # optional: 21 tests
 npm start
 ```
 
-Your workspace, your history and `backups/` stay as they are. Reload the page of the studio afterwards (Ctrl+F5).
+Each archive unpacks into `opennms-ui-studio/`, over your files. Your workspace, your history, `backups/` and the kit's
+own folders (`kit/.kit`, `kit/opennms`, `kit/backups`) stay as they are; `kit/kit.env` is not in the archives. Reload the
+page of the studio afterwards (Ctrl+F5).
 
 The settings of OpenNMS are in `kit/kit.env` (production `maven-admin@192.168.0.36`, container `opennms`,
 `http://192.168.0.36:8980/opennms`; dev container `onms-dev-core`, port 8980, login admin/admin). Change them there
@@ -114,7 +117,8 @@ Topology > *Import a CSS file* > `~/opennms-fundamentals/opennms-fundamentals/op
 From now on use the kit inside the studio (`kit/`): its `kit.env` points `STYLE_CSS` at the studio's
 `workspace/topology/topology.css`, so `kit/topo.sh css prod`, `kit/topo.sh persist` and the studio look at the same
 file. The first `kit/dev.sh up` in the new folder copies production's overlay folders again and creates the dev
-container again (its database stays). Leave the old kit folder alone afterwards: its `dev.sh up` would deploy its own
+container again (its database stays). `kit/dev.sh copy-prod` gives dev production's requisitions (its nodes) and
+GraphML views as well, so the preview can draw production's views (kit/GUIDE-node-icons.md, part 0). Leave the old kit folder alone afterwards: its `dev.sh up` would deploy its own
 `styles/topology.css` to dev.
 
 ## 4. How you work with it
@@ -164,7 +168,7 @@ the studio notices changes to the files.
 |---|---|
 | `server/` | the server, TypeScript on Node.js, without runtime packages: `src/target.ts` (the commands for dev and production), `src/overlay.ts` (which overlay folder takes a file), `src/changes.ts` (apply, backups, undo), `src/history.ts` (git), `src/modules/topology.ts`, `src/modules/menu.ts`, `src/util/iconcheck.ts` (the check of the icon files); `test/` its unit tests; `assets/` the stock topology stylesheet and the workspace README |
 | `web/` | the page: Vue 3, TypeScript, Vite. `src/views/` one file per page, `src/components/` the preview of the topology (`public/preview-frame.html`, built like the real page), the preview of the bars, the panels that apply |
-| `kit/` | the topology kit 3.11: `dev.sh` (the development OpenNMS), `topo.sh` (command line tools: `css prod`, `persist`, `export`, `view show`, `pagecheck`, ...) and its guides |
+| `kit/` | the topology kit 3.12: `dev.sh` (the development OpenNMS; `copy-prod` brings production's requisitions and views into it), `topo.sh` (command line tools: `css prod`, `persist`, `export`, `view show`, `view from-requisition`, `pagecheck`, ...) and its guides, among them `GUIDE-node-icons.md` (the files behind a node's icon, how OpenNMS builds the map, icons by node type) |
 | `docs/` | how OpenNMS builds the topology page and the menu bars, and how the studio works |
 | `scripts/` | `dev.mjs` (npm run dev), a systemd unit to run the studio as a service |
 

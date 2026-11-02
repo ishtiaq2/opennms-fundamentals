@@ -163,8 +163,11 @@ its computed fill, stroke and stroke-width.
 For each node, `IconRepositoryManager.getSVGIconId(vertex)` takes the first match:
 
 1. **`<namespace>.<node id>`**, a mapping for this one node (for a GraphML view `Maven-abc`: `Maven-abc.10`).
-2. **The node's icon key**, then shorter keys without the last `.part`, one at a time. A GraphML node's `iconKey` is
-   an icon id itself; Enhanced Linkd gives `linkd.system.snmp.<sysObjectID>`.
+2. **The node's icon key**, then shorter keys without the last `.part`, one at a time. Enhanced Linkd gives
+   `linkd.system.snmp.<sysObjectID>`. A GraphML node's `iconKey` is an icon id itself: each loaded view registers a
+   repository that knows the view's icon keys and answers each with itself (`GraphMLIconRepository`), so such a key is
+   never shortened, and a mapping line for it competes with the view's answer (the repositories are asked in no fixed
+   order). kit/GUIDE-node-icons.md, parts 3 and 4, has the details and how to give all nodes of a type one icon.
 3. **`default`**.
 
 The mappings live in `etc/org.opennms.features.topology.app.icons.<name>.cfg`: lines `<key> = <icon id>` (a colon in

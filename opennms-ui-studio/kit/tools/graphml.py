@@ -20,11 +20,24 @@
   graphml.py used <etc folder> <svg folder>
       the icon ids that the nodes of all the views in <etc folder>/graphml are drawn with (an svg file must define
       them), one per line, in alphabetical order: the ids to give a colour of their own (examples/13)
+  graphml.py from-requisition <requisition.xml> <icon-types.cfg> <svg folder> <view name> <out>
+      a GraphML view of the nodes of a requisition (etc/imports/<name>.xml): each node linked to its OpenNMS node by
+      foreignSource and foreignID, drawn under its parent node, with the icon of its type (icon-types.cfg; the type is
+      the first category of the node that the table names, else its asset category or modelNumber, else the word
+      its label starts with). GUIDE-node-icons.md, part 4.
+
+The icon of a GraphML node (IconRepositoryManager.getSVGIconId, GraphMLIconRepository in OpenNMS 33.1.8): a line
+"<namespace>.<node id> = <icon id>" in an icon mapping file, else the iconKey itself (every view answers for its own
+icon keys, unchanged: a key is never shortened), else the "default" line. A mapping file line for the iconKey itself
+competes with the view's own answer, and OpenNMS asks them in no fixed order: show warns about such lines.
 """
 import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from xml.sax.saxutils import escape, quoteattr
+
+import svgicons  # tools/svgicons.py: which ids of the svg files are icons
 
 NS = '{http://graphml.graphdrawing.org/xmlns}'
 TYPES = {'boolean', 'int', 'long', 'float', 'double', 'string'}
@@ -32,10 +45,8 @@ TAKEN = {'nodes', 'pathoutage', 'application', 'bsm', 'vmware'}  # namespaces of
 
 
 def icon_ids(svg_folder):
-    ids = set()
-    for f in Path(svg_folder).glob('*.svg'):
-        ids.update(re.findall(r'id="([^"]+)_icon"', f.read_text(errors='replace')))
-    return ids
+    """The icon ids of the svg files: X with X_rollover, X_active or X_icon next to it (tools/svgicons.py)."""
+    return set(svgicons.icon_ids(svg_folder))
 
 
 def defined_ids(svg_folder):
@@ -49,7 +60,7 @@ def defined_ids(svg_folder):
 
 def similar(word, ids):
     """Up to three icon ids that contain word: das_helix for helix."""
-    return sorted(i for i in ids if word.lower() in i.lower() and i != word)[:3]
+    return svgicons.similar(word, ids)
 
 
 def properties(root, element, kind):
@@ -242,6 +253,11 @@ def show(path, svg_folder, etc_folder):
             if defined and drawn not in defined:
                 near = similar(drawn, icons)
                 flag = ' ! no svg file defines "%s": no icon%s' % (drawn, '; similar ids: ' + ', '.join(near) if near else '')
+            key = n.get('iconKey')
+            if why == 'its iconKey' and key in maps and maps[key][0] != key:
+                flag += (' ! %s has the line "%s = %s" too: OpenNMS takes either that or the iconKey, in no fixed order'
+                         ' (a line for the node, "%s.%s = ...", is certain)' % (maps[key][1], escaped(key), maps[key][0],
+                                                                               escaped(ns), n['id']))
             print('  %-16s %-28s %-20s %s (%s)%s' % (n['id'], (n.get('label') or '')[:28], n.get('iconKey') or '-',
                                                   drawn, why, flag))
         if len(g['nodes']) > 300:
@@ -338,13 +354,136 @@ def prepare(source, target, svg_folder):
 
     def icon(m):
         word = m.group(1).lower()
-        found = next((i for i in ids if i.lower() == word), None) or next((i for i in ids if word in i.lower()), None)
+        found = svgicons.pick(svg_folder, word, ids)
         if not found and word not in told:
             print('  no icon for @%s@ in the svg folder: left as it is' % m.group(1))
             told.add(word)
         return found or m.group(0)
 
     Path(target).write_text(re.sub(r'@([A-Za-z][A-Za-z0-9_-]*)@', icon, text))
+    return 0
+
+
+REQ = '{http://xmlns.opennms.org/xsd/config/model-import}'
+
+
+def read_requisition(path):
+    """(foreign source, [node]) of a requisition file: <model-import foreign-source="..."> with <node> elements."""
+    root = ET.parse(path).getroot()
+    if root.tag != REQ + 'model-import':
+        raise ValueError('%s: not a requisition (<model-import> of %s)' % (path, REQ[1:-1]))
+    nodes = []
+    for n in root.findall(REQ + 'node'):
+        nodes.append({'fid': n.get('foreign-id'), 'label': n.get('node-label') or n.get('foreign-id') or '',
+                      'parent_fs': n.get('parent-foreign-source'), 'parent_fid': n.get('parent-foreign-id'),
+                      'parent_label': n.get('parent-node-label'),
+                      'categories': [c.get('name') for c in n.findall(REQ + 'category') if c.get('name')],
+                      'assets': {a.get('name'): a.get('value') or '' for a in n.findall(REQ + 'asset')}})
+    return root.get('foreign-source'), nodes
+
+
+def read_types(path):
+    """{type in lower case: icon id} of icon-types.cfg ("type = icon id" lines, # comments)."""
+    table = {}
+    for raw in Path(path).read_text(errors='replace').splitlines():
+        line = raw.strip()
+        if line and line[0] not in '#!' and '=' in line:
+            kind, icon = line.split('=', 1)
+            if kind.strip() and icon.strip():
+                table[kind.strip().lower()] = icon.strip()
+    return table
+
+
+def type_of(node, table):
+    """(type, where it comes from) of a requisition node, or (None, None)."""
+    for c in node['categories']:
+        if c.strip().lower() in table:
+            return c.strip().lower(), 'category ' + c
+    for field in ('category', 'modelNumber'):
+        value = node['assets'].get(field, '').strip()
+        if value.lower() in table:
+            return value.lower(), 'asset ' + field
+    word = re.match(r'[A-Za-z]+', node['label'])
+    if word and word.group(0).lower() in table:
+        return word.group(0).lower(), 'label'
+    return None, None
+
+
+def from_requisition(req_path, types_path, svg_folder, name, out):
+    source, nodes = read_requisition(req_path)
+    if not nodes:
+        print('  problem: the requisition %s has no nodes' % source)
+        return 1
+    table, icons = read_types(types_path), sorted(icon_ids(svg_folder))
+    by_fid = {n['fid']: n for n in nodes}
+    by_label = {n['label']: n for n in nodes}
+
+    def parent(n):  # a parent of the same requisition: by foreign id, or by node label
+        if n['parent_fs'] and n['parent_fs'] != source:
+            return None
+        return by_fid.get(n['parent_fid']) if n['parent_fid'] else by_label.get(n['parent_label'])
+
+    def level(n):
+        depth, seen, p = 0, {n['fid']}, parent(n)
+        while p and p['fid'] not in seen:
+            depth, seen, p = depth + 1, seen | {p['fid']}, parent(p)
+        return depth
+
+    rows, xml_nodes, xml_edges, icon_note = [], [], [], {}
+    for n in nodes:
+        kind, where = type_of(n, table)
+        icon = None
+        if kind:
+            wanted = table[kind]
+            icon = wanted if wanted in icons else svgicons.pick(svg_folder, kind, icons)
+            if icon != wanted:
+                icon_note[kind] = ('no svg file has the icon %s; %s' % (wanted, 'it takes %s' % icon if icon else
+                                                                         'its nodes get the default icon'))
+        rows.append((n['label'], n['fid'], '%s (%s)' % (kind, where) if kind else '-', icon or '(default icon)'))
+        data = [('label', n['label']), ('foreignSource', source), ('foreignID', n['fid']), ('level', str(level(n)))]
+        if icon:
+            data.insert(1, ('iconKey', icon))
+        tip = ', '.join(n['categories'])
+        if tip:
+            data.append(('tooltipText', 'Categories: ' + tip))
+        xml_nodes.append('    <node id=%s>%s</node>' % (quoteattr(n['fid']), ''.join(
+            '<data key="%s">%s</data>' % (k, escape(v)) for k, v in data)))
+        p = parent(n)
+        if p:
+            xml_edges.append('    <edge id=%s source=%s target=%s/>' % (
+                quoteattr('%s-%s' % (p['fid'], n['fid'])), quoteattr(p['fid']), quoteattr(n['fid'])))
+    label = '%s: icons by node type' % source
+    keys = [('label', 'graphml', 'string'), ('label', 'graph', 'string'), ('namespace', 'graph', 'string'),
+            ('focus-strategy', 'graph', 'string'), ('preferred-layout', 'graph', 'string'),
+            ('vertex-status-provider', 'graph', 'string'), ('label', 'node', 'string'), ('iconKey', 'node', 'string'),
+            ('foreignSource', 'node', 'string'), ('foreignID', 'node', 'string'), ('level', 'node', 'int'),
+            ('tooltipText', 'node', 'string')]
+    text = ['<?xml version="1.0" encoding="UTF-8"?>',
+            '<!-- Made by ./topo.sh view from-requisition from the requisition %s and icon-types.cfg (GUIDE-node-icons.md,'
+            ' part 4). Each node: its OpenNMS node (foreignSource, foreignID), its parent above it, the icon of its type'
+            ' as iconKey. -->' % escape(source).replace('--', '- -'),
+            '<graphml xmlns="http://graphml.graphdrawing.org/xmlns">']
+    text += ['  <key id="%s" for="%s" attr.name="%s" attr.type="%s"/>' % (k, f, k, t) for k, f, t in keys]
+    text += ['  <data key="label">%s</data>' % escape(label),
+             '  <graph id=%s edgedefault="undirected">' % quoteattr(name),
+             '    <data key="namespace">%s</data>' % escape(name),
+             '    <data key="label">%s</data>' % escape(label),
+             '    <data key="focus-strategy">ALL</data>',
+             '    <data key="preferred-layout">Hierarchy Layout</data>',
+             '    <data key="vertex-status-provider">default</data>']
+    text += xml_nodes + xml_edges + ['  </graph>', '</graphml>', '']
+    Path(out).write_text('\n'.join(text))
+    print('  requisition %s: %d nodes, %d links to a parent' % (source, len(nodes), len(xml_edges)))
+    print('  %-28s %-20s %-30s %s' % ('node label', 'foreign id', 'type (from)', 'icon (iconKey)'))
+    for row in rows[:300]:
+        print('  %-28s %-20s %-30s %s' % (row[0][:28], row[1][:20], row[2][:30], row[3]))
+    if len(rows) > 300:
+        print('  ... and %d more' % (len(rows) - 300))
+    for kind, note in sorted(icon_note.items()):
+        print('  ! type %s: %s' % (kind, note))
+    if any(r[2] == '-' for r in rows):
+        print('  Nodes without a type get the default icon: give them a category that icon-types.cfg names, or add a'
+              ' line for their type.')
     return 0
 
 
@@ -365,6 +504,8 @@ if __name__ == '__main__':
             sys.exit(set_icon(*a[1:]))
         if len(a) == 3 and a[0] == 'used':
             sys.exit(used(a[1], a[2]))
+        if len(a) == 6 and a[0] == 'from-requisition':
+            sys.exit(from_requisition(*a[1:]))
     except (ET.ParseError, ValueError, OSError) as e:
         print('  problem: %s' % e)
         sys.exit(1)

@@ -43,9 +43,10 @@ npm run build      # server/dist and web/dist
 npm test           # 21 tests, all "ok"
 ```
 
-Version 1.1.0 (the *Icon files* check, experiment T8) came as an update that holds only the files that changed:
-`tar xzf ~/opennms-ui-studio-1.1.0-update.tar.gz -C ~/opennms-fundamentals`, then `npm run build` in the studio folder
-and a restart of the studio (README.md, section 2). A new installation with that update on top of 1.0.0 is the same.
+Later versions come as updates that hold only the files that changed: 1.1.0 (the *Icon files* check, experiment T8)
+and 1.2.0 (the kit's `copy-prod`, the demo icons by node type, kit/GUIDE-node-icons.md). Unpack them in order over the
+folder, `tar xzf ~/opennms-ui-studio-<version>-update.tar.gz -C ~/opennms-fundamentals`, then `npm run build` in the
+studio folder and a restart of the studio (README.md, section 2).
 
 `npm test` checks the parts that touch OpenNMS files against the real OpenNMS 33.1.8 files: that the style file is
 byte for byte what the topology kit makes, that the Plugins label is found in Menubar.vue compiled four different
@@ -66,6 +67,9 @@ says why (usually: `ssh-copy-id maven-admin@192.168.0.36` once).
 Open the **command log** at the bottom (click it). Each line is a command the studio ran: `podman ...` for dev,
 `ssh maven-admin@192.168.0.36 podman ...` for production, `git ...` for your workspace. Keep it open while you
 learn: it is the answer to "what did it just do?".
+
+**Production's nodes and views on dev.** The preview draws the GraphML views of dev. To have production's views there,
+with their nodes, run `kit/dev.sh copy-prod` once (kit/GUIDE-node-icons.md, part 0, says what it does in OpenNMS).
 
 ### Step 1.4: Bring your CSS from the topology kit
 

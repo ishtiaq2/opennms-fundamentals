@@ -21,6 +21,9 @@
 #   ./topo.sh view icon <name> <node id> <icon id>   another icon for one node of a view (--reset: the view's own)
 #   ./topo.sh view add <file.graphml> [name]  a GraphML file becomes a view in opennms/ and on dev
 #   ./topo.sh view remove <name> [dev|prod]   takes a view out of opennms/ and away there
+#   ./topo.sh view from-requisition <requisition> [dev|prod]   a view of a requisition's nodes, each with the icon of
+#                                   its type (icon-types.cfg), in opennms/ and on dev
+#   ./topo.sh view reload [name...]           dev reads its views (all, or these) anew: after their nodes came
 source "$(dirname "$0")/tools/common.sh"
 
 WS=opennms                                       # the workspace: same paths as below /opt/opennms
@@ -594,6 +597,48 @@ view_remove() {
   fi
 }
 
+# A view of the nodes of one requisition, each with the icon of its type (icon-types.cfg; GUIDE-node-icons.md, part 4).
+# The requisition is the one that dev (or production) has deployed: etc/imports/<requisition>.xml.
+view_from_requisition() {
+  local req=$1 from=${2:-dev} c home file name
+  case $from in dev | prod) ;; *) die "usage: ./topo.sh view from-requisition <requisition> [dev|prod]" ;; esac
+  [ -d "$WS" ] || die "./topo.sh pull first: the view goes into opennms/ like the other topology files."
+  [ -f icon-types.cfg ] || die "There is no icon-types.cfg in the kit folder: lines \"<node type> = <icon id>\"."
+  check_target "$from"
+  c=$(container_of "$from")
+  home=$(home_of "$from")
+  file="$TMP/requisition.xml"
+  if ! tp "$from" exec "$c" cat "$home/etc/imports/$req.xml" >"$file" 2>/dev/null; then
+    say "There is no requisition $req in $(name_of "$from"). Its requisitions:"
+    # shellcheck disable=SC2016 # runs in the container
+    tp "$from" exec "$c" sh -c 'cd "$1/etc/imports" 2>/dev/null && ls -1 *.xml 2>/dev/null | sed "s/\.xml\$//"; true' sh "$home" </dev/null | sed 's/^/  /'
+    exit 1
+  fi
+  name="types-$(printf '%s' "$req" | tr -c 'A-Za-z0-9._-' '-')"
+  say "Requisition $req of $(name_of "$from"), with icon-types.cfg:"
+  python3 tools/graphml.py from-requisition "$file" icon-types.cfg "$WS/$SVG_DIR" "$name" "$TMP/$name.graphml" || die "Nothing changed."
+  view_add "$TMP/$name.graphml" "$name"
+}
+
+view_reload() { # dev reads these views (all of dev's, without names) anew: they look up their OpenNMS nodes again
+  local c home names=("$@")
+  check_target dev
+  c=$(container_of dev)
+  home=$(home_of dev)
+  # shellcheck disable=SC2016 # runs in the container
+  [ ${#names[@]} -gt 0 ] || mapfile -t names < <(tp dev exec "$c" sh -c 'cd "$1" && ls -1 etc/graphml/*.xml 2>/dev/null; true' sh "$home" | sed -nE 's#^etc/graphml/(.+)\.xml$#\1#p')
+  [ ${#names[@]} -gt 0 ] || { say "The development OpenNMS has no GraphML views."; return 0; }
+  # The cfg files go to /tmp in the container for 5 seconds: OpenNMS drops the views, then loads them again.
+  # shellcheck disable=SC2016 # runs in the container
+  tp dev exec "$c" sh -c 'cd "$1/etc" && shift && for v in "$@"; do for f in org.opennms.features.topology.plugins.topo.graphml-"$v".cfg org.opennms.netmgt.graph.provider.graphml-"$v".cfg; do
+      [ ! -f "$f" ] || mv "$f" "/tmp/$f.reload"; done; done' sh "$home" "${names[@]}" </dev/null
+  sleep 5
+  # shellcheck disable=SC2016 # runs in the container
+  tp dev exec "$c" sh -c 'cd "$1/etc" && shift && for v in "$@"; do for f in org.opennms.features.topology.plugins.topo.graphml-"$v".cfg org.opennms.netmgt.graph.provider.graphml-"$v".cfg; do
+      [ ! -f "/tmp/$f.reload" ] || mv "/tmp/$f.reload" "$f"; done; done' sh "$home" "${names[@]}" </dev/null
+  say "Dev loaded these views anew: ${names[*]}. Reload the topology page."
+}
+
 view() {
   case ${1:-list} in
     list) view_list "${2:-dev}" ;;
@@ -601,7 +646,9 @@ view() {
     icon) [ -n "${4:-}" ] || die "usage: ./topo.sh view icon <name> <node id> <icon id | --reset>"; view_icon "$2" "$3" "$4" ;;
     add) [ -n "${2:-}" ] || die "usage: ./topo.sh view add <file.graphml> [name]"; view_add "$2" "${3:-}" ;;
     remove) [ -n "${2:-}" ] || die "usage: ./topo.sh view remove <name> [dev|prod]"; view_remove "$2" "${3:-dev}" ;;
-    *) die "usage: ./topo.sh view [list [dev|prod] | show <name> [dev|prod] | icon <name> <node id> <icon id> | add <file.graphml> [name] | remove <name> [dev|prod]]" ;;
+    from-requisition) [ -n "${2:-}" ] || die "usage: ./topo.sh view from-requisition <requisition> [dev|prod]"; view_from_requisition "$2" "${3:-dev}" ;;
+    reload) view_reload "${@:2}" ;;
+    *) die "usage: ./topo.sh view [list [dev|prod] | show <name> [dev|prod] | icon <name> <node id> <icon id> | add <file.graphml> [name] | remove <name> [dev|prod] | from-requisition <requisition> [dev|prod] | reload [name...]]" ;;
   esac
 }
 
@@ -1023,7 +1070,7 @@ case ${1:-} in
     esac
     ;;
   *)
-    sed -n '2,23p' "$0"
+    sed -n '2,26p' "$0"
     exit 2
     ;;
 esac

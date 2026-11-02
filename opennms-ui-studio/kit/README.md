@@ -6,6 +6,8 @@ production with no restart. **FILES.md** describes each file, with an example yo
 **GUIDE-Maven-abc-styles.md** walks through one whole round for a GraphML view: setup, changes, production.
 **GUIDE-icon-backgrounds.md** changes the green behind the icons: one colour for all icons, one for each icon.
 **GUIDE-production-permanent.md** makes the finished files part of production for good, and lists the manual steps.
+**GUIDE-node-icons.md** explains the icon of each node: the files and the podman commands to read and change them, how
+OpenNMS builds the map, where an icon comes from (with exercises), and how every node of one type gets one icon.
 
 | Machine | Address | What runs there |
 |---|---|---|
@@ -34,6 +36,7 @@ The addresses, names and images are in `kit.env`.
    chmod +x dev.sh topo.sh   # only if "Permission denied": some unpackers drop the executable bit
    ./dev.sh up       # the development OpenNMS
    ./topo.sh pull    # the topology files of production: into opennms/, and onto dev
+   ./dev.sh copy-prod   # optional: production's requisitions (its nodes) and views too (GUIDE-node-icons.md, part 0)
    ```
 
    A new version of the kit goes over an old folder like this: `tar xzf opennms-topology-kit.tar.gz --strip-components=1 -C <old folder>`,
@@ -150,9 +153,11 @@ find opennms -type f | sort    # the topology files
 ./topo.sh diff                 # what you changed in them since the last pull or production deploy
 ```
 
-**Not copied from production:** its configuration (`/opt/opennms/etc` and the etc overlay), its database with its
-nodes, and its other containers (`maven-nms`, `postgres-database`). Dev keeps its own configuration and PostgreSQL,
-and gets the demo below.
+**Not copied from production:** its configuration (`/opt/opennms/etc` and the etc overlay), its database, and its
+other containers (`maven-nms`, `postgres-database`). Dev keeps its own configuration and PostgreSQL, and gets the demo
+below. **On request:** `./dev.sh copy-prod` copies production's requisitions into dev and imports them there, so dev gets
+the same nodes (and monitors them itself), then its GraphML views with `./topo.sh pull`; `./dev.sh remove-nodes
+<requisition>` takes a requisition and its nodes out of dev again (GUIDE-node-icons.md, part 0).
 
 **Inside the containers**, below `/opt/opennms`:
 
@@ -162,13 +167,14 @@ ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml  # 
 ./dev.sh prod-info             # production: volumes, the files of its overlay folders, web settings
 ```
 
-**The demo** (`./dev.sh up` adds it to dev only, from `seed/`; it runs again when a new kit version changes it):
+**The demo** (`./dev.sh up` adds it to dev only, from `seed/`; it runs again when a new kit version changes it, and
+`./dev.sh seed` runs it at once):
 
 | What | Where you see it |
 |---|---|
 | 6 nodes in requisition DAS-Demo: orion-1; helix-1, stratus-1 and stratus-2 under it; nimbus-1 and nimbus-2 under helix-1 | Info > Nodes, and the Status Overview of the start page, which also counts nodes your image adds itself. `./dev.sh status` lists the nodes per requisition. |
 | a model number (sysObjectID) for each type, and the links between the nodes | View > Enhanced Linkd: the icons by model (`linkd.system.snmp.1.3.6.1.4.1.99999.1.<n>`) and the links |
-| the same DAS as a GraphML view | View > DAS demo (GraphML) |
+| the same DAS as a GraphML view, each node with the icon of its type: the icon `icon-types.cfg` names if an svg file has it, else one named like the type (`nimbus`, `das_nimbus`), else a stock icon | View > DAS demo (GraphML); `./dev.sh seed` prints the icon of each type |
 | each node's parent | View > Path Outage: each node under its parent. It opens on one node at semantic zoom level 0: press "Increase Semantic Zoom Level" in the toolbar twice, or open the Path Outage link of `./dev.sh status`. |
 | one nodeDown event for nimbus-2 | Alarms: nimbus-2, Major, "Node is down", and its status colour on the maps. It is there to show alarm colours; clear it on the alarm page. |
 
@@ -180,6 +186,9 @@ ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml  # 
 | `./dev.sh status`, `./dev.sh logs [file]` | state, addresses, failing health checks, a test login; follow `karaf.log` (or another OpenNMS log) |
 | `./dev.sh down`, `./dev.sh reset` | stop (`up` starts again with all data); delete the containers, their data and the overlay copy |
 | `./dev.sh prod-info` | production container: image, command, user, privileges, ports, volumes, variable names, overlay files, web settings, login page |
+| `./dev.sh copy-prod [requisition...]` | production's requisitions (its nodes) into dev, imported there, then its GraphML views (`./topo.sh pull`), and how each view reaches its nodes |
+| `./dev.sh remove-nodes <requisition>` | a requisition and its nodes out of dev (production is not touched) |
+| `./dev.sh seed` | the demo nodes and the view "DAS demo" again, with the icons of `icon-types.cfg` |
 | `./topo.sh pull [prod\|dev]` | copy the topology files into `opennms/` (from production: also onto dev) |
 | `./topo.sh deploy dev\|prod [-y]`, `./topo.sh undo [-y]` | hot deploy; undo the last production deploy |
 | `./topo.sh persist` | for each file you sent to production: is it in the container and in an overlay folder, and the same in both (GUIDE-production-permanent.md) |
@@ -188,6 +197,8 @@ ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml  # 
 | `./topo.sh css [dev\|prod]`, `./topo.sh css <icon id \| file.svg>` | the svg files and their style rules, whether that OpenNMS has your CSS; CSS for the parts of one icon (FILES.md, section 6) |
 | `./topo.sh view [list [dev\|prod]]`, `view show <name> [dev\|prod]`, `view add <file> [name]`, `view remove <name> [dev\|prod]` | GraphML views (FILES.md, section 5) |
 | `./topo.sh view icon <name> <node id> <icon id \| --reset>` | another icon for one node of a view: the line `<namespace>.<node id> = <icon id>`, written for you, and deployed to dev |
+| `./topo.sh view from-requisition <requisition> [dev\|prod]` | a GraphML view of a requisition's nodes, each under its parent, with the icon of its type (`icon-types.cfg`; GUIDE-node-icons.md, part 4.2) |
+| `./topo.sh view reload [name...]` | dev loads its views again, so that each looks up its OpenNMS nodes anew |
 
 ## When something goes wrong
 
@@ -214,6 +225,10 @@ ssh maven-admin@192.168.0.36 podman exec opennms ls /opt/opennms/etc/graphml  # 
 - **Dev stops starting after it copied production's overlay folders**: set `DEV_PROD_OVERLAYS=no` in `kit.env`
   and run `./dev.sh up`; `./dev.sh prod-info` lists what those folders hold.
 - **The demo nodes fail with HTTP 401**: your image has another admin password. Set `DEV_USER` and `DEV_PASSWORD` in `kit.env`.
+- **A demo node has a stock icon although your image has an icon for its type** (nimbus-2 with `wifiAccess`): kits
+  before 3.12 found icons only by their `<g id="X_icon">` group, which `nimbus.svg` lacks. Run `./dev.sh seed`; it
+  prints the icon it chose for each type (GUIDE-node-icons.md, part 0).
+- **Production's nodes or views are missing on dev**: `./dev.sh copy-prod` (GUIDE-node-icons.md, part 0).
 - **A health check says "Bundle 81 is waiting for dependencies"**: a Karaf bundle of the image cannot start in dev, often
   one that needs production's other containers. To see which one and what it waits for: `ssh -p 8101 admin@localhost`
   (password admin), then `bundle:diag 81`. The topology page works without it.

@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Development demo: the DAS as a GraphML view. Vertices point to the DAS-Demo nodes, so they
-     show their alarms. In GraphML, iconKey is the icon id itself; tools/seed.py replaces @orion@ etc.
-     with the icon ids the development OpenNMS has (your helix.svg, ... or a stock icon). -->
+     show their alarms. In GraphML, iconKey is the icon id itself: tools/seed.py puts the icon of each node
+     type in place of the words between @ signs, the one icon-types.cfg names if the svg files of the
+     development OpenNMS have it, else one named like the type (nimbus, das_nimbus), else a stock icon. -->
 <graphml xmlns="http://graphml.graphdrawing.org/xmlns"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">

@@ -7,30 +7,33 @@ device, user-defined links between them, the GraphML view "DAS demo" and one nod
 """
 import argparse
 import base64
+import io
 import json
-import re
+import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
+import svgicons  # tools/svgicons.py: the icons of the svg files, the way the topology page draws them
+
 ROOT = Path(__file__).resolve().parent.parent
 # Demo sysObjectIDs (enterprise 99999 is a placeholder): icon key linkd.system.snmp.1.3.6.1.4.1.99999.1.<n>
 SYSOID = {'orion': '.1.3.6.1.4.1.99999.1.1', 'helix': '.1.3.6.1.4.1.99999.1.2',
           'stratus': '.1.3.6.1.4.1.99999.1.3', 'nimbus': '.1.3.6.1.4.1.99999.1.4'}
+# The icon of each node type when the svg folder has none of its own (the stock icons of opennms_icons.svg).
 STOCK = {'orion': 'router', 'helix': 'switch', 'stratus': 'server', 'nimbus': 'wifiAccess'}
 LINKS = [('orion-1', 'Q1', 'stratus-1', 'QSFP28 100G'), ('orion-1', 'Q2', 'helix-1', 'QSFP+ 40G'),
          ('orion-1', 'Q3', 'stratus-2', 'SFP28 25G in QSA'), ('helix-1', 'S1', 'nimbus-1', 'SFP28 25G'),
          ('helix-1', 'S2', 'nimbus-2', 'SFP28 25G')]
 
-args = argparse.ArgumentParser()
-for a in ('url', 'user', 'password', 'container', 'podman'):
-    args.add_argument('--' + a, required=True)
-opt = args.parse_args()
-AUTH = 'Basic ' + base64.b64encode(f'{opt.user}:{opt.password}'.encode()).decode()
+opt = None   # the command line (below)
+AUTH = ''
 
 
 def rest(method, path, body=None, ctype='application/xml', accept='application/json'):
@@ -52,11 +55,58 @@ def nodes():
     return found if isinstance(found, list) else [found]
 
 
-def icon_ids():
-    """The icon ids the svg files of the development OpenNMS define (<g id="<id>_icon">)."""
-    cmd = opt.podman.split() + ['exec', opt.container, 'sh', '-c', 'cat /opt/opennms/jetty-webapps/opennms/svg/*.svg']
-    out = subprocess.run(cmd, capture_output=True, text=True).stdout
-    return set(re.findall(r'id="([^"]+)_icon"', out))
+def svg_folder():
+    """A temporary copy of the svg files of the development OpenNMS (None if podman cannot copy them)."""
+    pm = opt.podman.split()
+    home = subprocess.run(pm + ['exec', opt.container, 'readlink', '-f', '/opt/opennms'],
+                          capture_output=True, text=True).stdout.strip() or '/opt/opennms'
+    data = subprocess.run(pm + ['cp', f'{opt.container}:{home}/jetty-webapps/opennms/svg', '-'], capture_output=True).stdout
+    folder = Path(tempfile.mkdtemp(prefix='kit-seed-svg-'))
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+            for member in tar.getmembers():  # only the files, by their own name: nothing lands outside the folder
+                if member.isfile() and member.name.endswith('.svg'):
+                    (folder / Path(member.name).name).write_bytes(tar.extractfile(member).read())
+    except tarfile.TarError:
+        shutil.rmtree(folder, ignore_errors=True)
+        return None
+    return folder
+
+
+def icon_types():
+    """{node type: icon id} from icon-types.cfg of the kit (GUIDE-node-icons.md, part 4), keys in lower case."""
+    table, path = {}, ROOT / 'icon-types.cfg'
+    if path.is_file():
+        for raw in path.read_text(errors='replace').splitlines():
+            line = raw.strip()
+            if line and line[0] not in '#!' and '=' in line:
+                key, value = line.split('=', 1)
+                table[key.strip().lower()] = value.strip()
+    return table
+
+
+def icons_by_type(folder):
+    """{node type: (icon id, note)} for the four demo types: the icon of icon-types.cfg if an svg file has it, else
+    the icon named like the type (nimbus, das_nimbus, ...), else the stock icon."""
+    files = svgicons.svg_files(folder) if folder else []
+    icons = sorted({i for f in files for i in f.icons})
+    table, out = icon_types(), {}
+    for kind, stock in STOCK.items():
+        wanted = table.get(kind)
+        own = wanted if wanted in icons else (svgicons.pick(folder, kind, icons) if icons else None)
+        named = 'the icon %s of icon-types.cfg' % wanted if wanted else 'an icon named like %s' % kind
+        if not own:
+            out[kind] = (stock, ', a stock icon (no svg file has %s, nor one named like %s)' % (named, kind)
+                         if wanted else ', a stock icon (no svg file has %s)' % named)
+            continue
+        note = '' if own == wanted or not wanted else ' (no svg file has %s; %s is named like %s)' % (named, own, kind)
+        home = next(f for f in files if own in f.icons)
+        stacked = home.stacked(own)
+        if stacked:  # the user's nimbus.svg: the three looks inside #nimbus, so the nodes show the last one
+            note += (' (%s keeps its looks inside #%s, so a node shows #%s, the last one, until the file is repaired:'
+                     ' GUIDE-node-icons.md, part 1.1)' % (home.name, own, stacked[-1]))
+        out[kind] = (own, note)
+    return out
 
 
 def step(title, work, failed):
@@ -100,13 +150,16 @@ def main():
                  f'<link-id>{link_id}</link-id><link-label>{label}</link-label><owner>das-demo</owner></user-defined-link>')
 
     def graphml():
-        ids = icon_ids()
+        folder = svg_folder()
+        try:
+            chosen = icons_by_type(folder)
+        finally:
+            if folder:
+                shutil.rmtree(folder, ignore_errors=True)
         graph = (ROOT / 'seed' / 'das-demo.graphml').read_text()
-        for kind, stock in STOCK.items():
-            own = next((i for i in sorted(ids) if i.lower() == kind), None) or \
-                next((i for i in sorted(ids) if kind in i.lower()), None)
-            graph = graph.replace(f'@{kind}@', own or stock)
-            print(f'  {kind}: icon {own or stock}' + ('' if own else ' (stock; no ' + kind + ' icon in the svg folder)'))
+        for kind, (icon, note) in chosen.items():  # the iconKey of a GraphML node is the icon id itself
+            graph = graph.replace(f'@{kind}@', icon)
+            print(f'  {kind} nodes: iconKey {icon}{note}')
         # The GraphML REST calls answer in XML only (@Produces application/xml): Accept JSON gets "406 Not Acceptable".
         try:
             rest('DELETE', '/rest/graphml/das-demo', accept='application/xml')
@@ -128,8 +181,14 @@ def main():
         raise RuntimeError('these steps failed: ' + '; '.join(failed))
 
 
-try:
-    main()
-except Exception as e:
-    print(f'seed failed: {e}', file=sys.stderr)
-    sys.exit(1)
+if __name__ == '__main__':
+    args = argparse.ArgumentParser()
+    for a in ('url', 'user', 'password', 'container', 'podman'):
+        args.add_argument('--' + a, required=True)
+    opt = args.parse_args()
+    AUTH = 'Basic ' + base64.b64encode(f'{opt.user}:{opt.password}'.encode()).decode()
+    try:
+        main()
+    except Exception as e:
+        print(f'seed failed: {e}', file=sys.stderr)
+        sys.exit(1)

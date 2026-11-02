@@ -4,23 +4,25 @@
 OpenNMS 33.1.8 picks a node's icon like this (IconRepositoryManager.getSVGIconId):
   1. "<namespace>.<vertex id>" in an icon mapping file: a mapping for this one node;
   2. the node's icon key in a mapping file, then the key without its last ".part", and so on;
-     in a GraphML view the icon key is the icon id itself;
+     in a GraphML view the icon key is the icon id itself (the view answers for its own keys, unchanged);
   3. "default" in a mapping file.
-The rules here use the mapping files in opennms/etc, so they show what a deploy would give.
+The rules here use the mapping files in opennms/etc, so they show what a deploy would give. GUIDE-node-icons.md,
+part 3, walks through them.
 """
 import base64
 import getpass
 import json
-import re
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
+import svgicons  # tools/svgicons.py: which ids of the svg files are icons, and what is wrong with a file
+
 SVG = Path('opennms/jetty-webapps/opennms/svg')
 ETC = Path('opennms/etc')
-STOCK = {'opennms_icons.svg', 'atlas_icons.svg', 'vmware_icons.svg', 'legacy_icons.svg'}  # not checked: they have quirks
+STOCK_NAMESPACES = ('nodes', 'pathoutage', 'application', 'bsm', 'vmware')  # views that are not GraphML views
 
 
 def properties(path):
@@ -46,35 +48,20 @@ def properties(path):
 DEFINED = set()  # every id of every svg file: <use href="#id"> draws any of them (GWTVertex)
 
 
-def svg_icons():
-    """{icon id: (file, missing state groups)} for every <g id="<id>_icon"> in the svg folder."""
-    found = {}
-    for f in sorted(SVG.glob('*.svg')):
-        ids = set(re.findall(r'\bid="([^"]+)"', f.read_text(errors='replace')))
-        DEFINED.update(ids)
-        for icon in sorted(i[:-5] for i in ids if i.endswith('_icon')):
-            found[icon] = (f.name, [s for s in (icon, icon + '_rollover', icon + '_active') if s not in ids])
-    return found
-
-
 def main():
     if not SVG.is_dir():
         sys.exit('There is no opennms/ yet: ./topo.sh pull')
-    icons = svg_icons()
+    files = svgicons.svg_files(SVG)
+    for f in files:
+        DEFINED.update(f.ids)
     print(f'Icons in {SVG}:')
-    by_file = {}
-    for icon, (name, _) in icons.items():
-        by_file.setdefault(name, []).append(icon)
-    for name, ids in sorted(by_file.items()):
-        shown = ', '.join(ids) if len(ids) <= 12 else f'{len(ids)} icons: ' + ', '.join(ids[:8]) + ', ...'
-        print(f'  {name:<26} {shown}')
-    for icon, (name, missing) in icons.items():
-        if missing and name not in STOCK:
-            print(f'  ! {name}: icon "{icon}" lacks the group(s) {", ".join(missing)}; '
-                  'OpenNMS draws <id> normally, <id>_rollover under the mouse and <id>_active when selected')
-    for f in sorted(SVG.glob('*.svg')):
-        if f.name not in by_file and not f.name.startswith('zz-'):
-            print(f'  ! {f.name} has no <g id="..._icon"> group, so it adds no icon')
+    for f in files:
+        shown = ', '.join(f.icons) if len(f.icons) <= 12 else f'{len(f.icons)} icons: ' + ', '.join(f.icons[:8]) + ', ...'
+        print(f'  {f.name:<26} {shown or "(no icon: no id X with X_rollover, X_active or X_icon next to it)"}')
+    for f in files:
+        if not f.stock:  # OpenNMS's own files have quirks of their own
+            for problem in f.problems():
+                print(f'  ! {f.name}: {problem}')
 
     repos = {f.name: properties(f) for f in sorted(ETC.glob('org.opennms.features.topology.app.icons.*.cfg'))}
 
@@ -85,14 +72,17 @@ def main():
         hit = lookup(f'{namespace}.{vertex_id}')
         if hit:
             return hit[0], f'{namespace}.{vertex_id} in {hit[1]}'
+        graphml = namespace not in STOCK_NAMESPACES and not namespace.startswith('nodes:')
+        if graphml and key:  # GraphMLIconRepository: every icon key of the view is an icon id of itself, unchanged
+            other = lookup(key)
+            note = f'; {other[1]} maps "{key}" too, and OpenNMS takes either, in no fixed order' if other and other[0] != key else ''
+            return key, f'GraphML: the icon key is the icon id{note}'
         while key:
             hit = lookup(key)
             if hit:
                 return hit[0], f'{key} in {hit[1]}'
             if key == 'default':
                 return None, 'no "default" mapping'
-            if '.' not in key and key != 'default':  # GraphMLIconRepository: the icon key is the icon id, svg or not
-                return key, 'GraphML: the icon key is the icon id'
             key = key.rsplit('.', 1)[0] if '.' in key else 'default'
         hit = lookup('default')
         return (hit[0], f'default in {hit[1]}') if hit else (None, 'no mapping')

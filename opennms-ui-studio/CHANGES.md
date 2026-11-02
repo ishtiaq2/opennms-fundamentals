@@ -1,5 +1,36 @@
 # Changes
 
+## 1.2.0: production's nodes and views on dev, demo icons by node type, a guide to node icons (kit 3.12)
+
+Two problems on the development OpenNMS, and a guide.
+
+- **Dev lacked production's requisitions, nodes and views** (production has `etc/graphml/Maven-abc.xml` and
+  `MavenNebulaDAS.xml`, dev only the demo). New: `kit/dev.sh copy-prod [requisition...]` copies production's deployed
+  requisitions and their foreign source definitions into dev through its REST API and imports them (dev then has the
+  nodes and monitors them itself), runs `kit/topo.sh pull` for the views, loads them again so they find their nodes, and
+  reports how each view links its nodes (`foreignSource`/`foreignID` is portable, `nodeID` is not).
+  `kit/dev.sh remove-nodes <requisition>` takes a requisition and its nodes out of dev.
+- **The demo nodes had stock icons** (nimbus-2 had the iconKey `wifiAccess`, not `nimbus`): the kit found icons only by
+  their `<g id="X_icon">` wrapper, which `nimbus.svg` lacks. The kit now finds icons by the ids OpenNMS draws
+  (`tools/svgicons.py`), in the seed, the examples, `./topo.sh icons` and `view add`; the demo takes the icon of each
+  node type from the new `kit/icon-types.cfg`. `kit/dev.sh seed` runs the seed again now (`kit/dev.sh up` does it
+  after an update by itself).
+
+New in the kit: `kit/GUIDE-node-icons.md` (the files behind a node's icon and the podman commands to read and change
+them, how OpenNMS builds the map, where an icon comes from with exercises, icons by node type);
+`./topo.sh view from-requisition <requisition>` (a GraphML view of a requisition, each node with the icon of its type);
+`./topo.sh view reload [name...]`; warnings in `./topo.sh view show` and `./topo.sh icons` about a mapping line for a
+GraphML iconKey (OpenNMS answers such a key from the view itself too, in no fixed order).
+
+Changed files: `kit/dev.sh`, `kit/topo.sh`, `kit/tools/seed.py`, `kit/tools/graphml.py`, `kit/tools/icons.py`,
+`kit/tools/example-lib.sh`, `kit/seed/das-demo.graphml`, `kit/README.md`, `kit/FILES.md`, `README.md`, `GUIDE.md`,
+`docs/opennms-topology.md`, `CHANGES.md`, the version in `package.json`, `server/package.json`, `web/package.json` and
+`package-lock.json`. New: `kit/GUIDE-node-icons.md`, `kit/icon-types.cfg`, `kit/tools/svgicons.py`,
+`kit/tools/prodcopy.py`. The studio's own code did not change: no build is needed.
+
+Tested on stand-ins of the development and production OpenNMS (podman and ssh replaced by scripts, a REST stand-in
+for dev), not on a real OpenNMS.
+
 ## 1.1.0: icon files that hide their own colours (the nimbus case)
 
 A rule for the parts of an icon (`#nimbus_default .cls-1 { fill: red !important; }`) was applied and the nodes did not

@@ -48,7 +48,9 @@ The stock files are:
 - `atlas_icons.svg`, `vmware_icons.svg` and `legacy_icons.svg`
 
 Your production image adds `helix.svg`, `orion.svg` and `nimbus.svg`. `./topo.sh icons` lists every icon id
-and points out a file that lacks one of the four groups. After a change, reload the page (section 6 says when the
+and points out a file that lacks one of the four groups, or keeps the three looks inside `<g id="X">` instead of next to
+it (as `nimbus.svg` does: the node then always shows the last one; GUIDE-node-icons.md, part 1.1). An icon id, for the
+kit, is an id X with `X_rollover`, `X_active` or `X_icon` next to it (`tools/svgicons.py`). After a change, reload the page (section 6 says when the
 browser cache matters).
 
 - **Example 05** recolours the stock icons by changing two colours in `opennms_icons.svg`.
@@ -76,7 +78,11 @@ For each node OpenNMS takes the first match (`IconRepositoryManager.getSVGIconId
    namespace no node has does nothing, and `./topo.sh view show` says so.
 2. **The node's icon key.** If that key has no mapping, the key without its last `.part` is tried, and so on.
    - **Enhanced Linkd** gives a node `linkd.system.snmp.<sysObjectID>` (`linkd.system` without SNMP), in namespace `nodes` (`nodes:<layer>` for a layer). The vertex id is the node id.
-   - **GraphML:** the node's `iconKey` is the icon id itself.
+   - **GraphML:** the node's `iconKey` is the icon id itself. Each loaded view registers an icon repository of its own
+     that knows the view's icon keys and answers each with itself (`GraphMLIconRepository`), so a GraphML key is never
+     shortened. A mapping line for the key itself (`helix = das_helix`) competes with that answer: OpenNMS asks its
+     repositories in no fixed order, so such a line works now and then. Change the iconKey or the svg ids instead
+     (GUIDE-node-icons.md, part 4); `./topo.sh view show` warns about such lines.
 3. **`default`.**
 
 To see a node's namespace, id and icon key, select it and open the Info panel of the topology page,
@@ -177,12 +183,20 @@ A node without `foreignSource` and `foreignID` (or `nodeID`) is a drawing only: 
 ./topo.sh deploy dev                       # after a change of opennms/etc/graphml/<name>.xml: the view is loaded anew
 ./topo.sh deploy prod                      # to production, with confirmation, backups/ and ./topo.sh undo
 ./topo.sh view remove <name> [dev|prod]    # out of opennms/, and away there
+./topo.sh view from-requisition <requisition> [dev|prod]  # a view of its nodes, each with the icon of its type (icon-types.cfg)
+./topo.sh view reload [name...]            # dev loads its views again: they look up their OpenNMS nodes anew
 ```
 
 `./topo.sh view add` checks what the GraphML reader of OpenNMS refuses (a `<data>` without its `<key>`, two nodes with one
 id, a link to an unknown node, no or a taken namespace), lists icon keys that no svg file defines, and replaces `@orion@`,
 `@helix@`, ... with the icon id of that word in the svg folder. `./topo.sh pull` copies production's views into `opennms/`
-with the other topology files (but not the demo view).
+with the other topology files (but not the demo view); `./dev.sh copy-prod` copies production's requisitions first, so
+that the views find their nodes on dev.
+
+**A node of a view and its OpenNMS node.** With `nodeID`, a view names a database id: each OpenNMS numbers its own nodes,
+so on dev that id is another node, or none. With `foreignSource` and `foreignID` (used only when there is no `nodeID`),
+OpenNMS looks the node up when it loads the view; a node that comes later needs the view loaded again
+(`./topo.sh view reload`). GUIDE-node-icons.md, part 2.4.
 
 **A view that production's software writes** (one per requisition, for example) may be written again at any time. Change
 its look around the file where you can: a line `<namespace>.<node id> = <icon id>` in

@@ -10,6 +10,9 @@
 #   ./dev.sh down          stop; ./dev.sh up starts it again with all data
 #   ./dev.sh reset         delete the containers and all their data
 #   ./dev.sh prod-info     how the production container runs (image, command, user, privileges, ports, volumes, variable names)
+#   ./dev.sh copy-prod [requisition...]  production's requisitions (its nodes) and GraphML views, into dev
+#   ./dev.sh remove-nodes <requisition>  a requisition and its nodes, out of dev (never production)
+#   ./dev.sh seed          the demo nodes and the view "DAS demo" again, with the icons of icon-types.cfg
 source "$(dirname "$0")/tools/common.sh"
 
 POD_LABEL=io.das-topology-kit.pod # kit version and published ports of the pod
@@ -397,9 +400,9 @@ wait_opennms() { # wait_opennms [running]: OpenNMS ran already before this ./dev
   done
 }
 
-seed_once() { # again when seed/ or tools/seed.py changed (a new kit version)
+seed_once() { # again when seed/, tools/seed.py, tools/svgicons.py or icon-types.cfg changed (a new kit version)
   local print
-  print=$(cat seed/* tools/seed.py | md5sum | cut -c 1-12)
+  print=$(cat seed/* tools/seed.py tools/svgicons.py icon-types.cfg 2>/dev/null | md5sum | cut -c 1-12)
   [ "$(cat .kit/seeded 2>/dev/null)" != "$print" ] || return 0
   if python3 -u tools/seed.py --url "$URL" --user "$DEV_USER" --password "$DEV_PASSWORD" --container "$DEV_CONTAINER" --podman "$PODMAN"; then
     mkdir -p .kit && echo "$print" >.kit/seeded
@@ -441,6 +444,7 @@ up() {
   login_check
   say "Development OpenNMS: http://$(host_address):$DEV_PORT/opennms/topology   (user $DEV_USER, password $DEV_PASSWORD)"
   [ -d opennms ] || say "Next: ./topo.sh pull   (copies the topology files of production here and into it)"
+  say "Production's requisitions (its nodes) and views on dev too: ./dev.sh copy-prod"
 }
 
 status() {
@@ -465,6 +469,56 @@ status() {
   say "  Health checks:"
   python3 tools/webcheck.py health "$URL" "$DEV_USER" "$DEV_PASSWORD" | sed 's/^/  /' || true
   login_check | sed 's/^/  /'
+}
+
+dev_ready() { # the development OpenNMS answers its REST API, or the script stops
+  running "$DEV_CONTAINER" || die "The development OpenNMS is not running: ./dev.sh up"
+  [ "$(opennms_state)" != down ] || die "The development OpenNMS does not answer on $URL yet (./dev.sh status)."
+}
+
+# Production's requisitions and GraphML views in dev (GUIDE-node-icons.md, part 2). The requisitions that production
+# has deployed (etc/imports, and etc/foreign-sources for their detectors and policies) go to dev's REST API, the way
+# the web UI sends a requisition, and are imported there: provisiond inserts the nodes into dev's database and scans
+# them, so dev monitors those devices from then on, as production does. Then ./topo.sh pull copies production's
+# topology files, the views among them, into opennms/ and onto dev. Nodes first: a GraphML view looks up the OpenNMS
+# nodes of its foreignSource/foreignID links when it is loaded.
+copy_prod() {
+  local home tmp d status=0
+  need_prod
+  [ "$(pp container inspect -f '{{.State.Running}}' "$PROD_CONTAINER" 2>/dev/null)" = true ] ||
+    die "Container $PROD_CONTAINER on $PROD_SSH is not running (podman ps there)."
+  dev_ready
+  home=$(pp exec "$PROD_CONTAINER" readlink -f /opt/opennms)
+  tmp=$(mktemp -d)
+  for d in imports foreign-sources; do # podman cp of a folder writes a tar archive: imports/<name>.xml, ...
+    { pp cp "$PROD_CONTAINER:$home/etc/$d" - 2>/dev/null | tar -xf - -C "$tmp"; } 2>/dev/null || true
+  done
+  say "Production's requisitions ($PROD_CONTAINER: $home/etc/imports), into the development OpenNMS:"
+  python3 tools/prodcopy.py copy "$URL" "$DEV_USER" "$DEV_PASSWORD" "$tmp" "$@" || status=1
+  rm -rf "$tmp"
+  [ "$status" = 0 ] || [ $# -eq 0 ] || die "Nothing more done: copy-prod with requisition names stops at a problem."
+  say ""
+  say "Production's GraphML views, with its other topology files: ./topo.sh pull (into opennms/, and onto dev)"
+  if ./topo.sh pull prod; then
+    ./topo.sh view reload >/dev/null || true # a view that was loaded before its nodes came looks them up now
+    say ""
+    say "How the views reach their nodes on dev:"
+    python3 tools/prodcopy.py views "$URL" "$DEV_USER" "$DEV_PASSWORD" opennms/etc/graphml || true
+  else
+    status=1
+    say "The views did not come along (above). The requisitions did; ./topo.sh pull brings the views later."
+  fi
+  say ""
+  say "Reload the topology page: View lists production's views. Dev now monitors the copied nodes itself (their"
+  say "status on dev is dev's own); ./dev.sh remove-nodes <requisition> takes a requisition and its nodes out again."
+  return $status
+}
+
+remove_nodes() {
+  [ -n "${1:-}" ] || die "usage: ./dev.sh remove-nodes <requisition>   (./dev.sh status lists the requisitions)"
+  dev_ready
+  say "Requisition $1, out of the development OpenNMS (production is not touched):"
+  python3 tools/prodcopy.py remove "$URL" "$DEV_USER" "$DEV_PASSWORD" "$1"
 }
 
 prod_info() {
@@ -519,8 +573,15 @@ case ${1:-} in
   down) p pod stop -t 120 "$DEV_POD" >/dev/null && say 'Stopped. ./dev.sh up starts it again.' ;; # OpenNMS needs time to stop cleanly
   reset) remove_stack && say "Removed $DEV_POD and all its data." ;;
   prod-info) prod_info ;;
+  copy-prod) copy_prod "${@:2}" ;;
+  remove-nodes) remove_nodes "${2:-}" ;;
+  seed)
+    dev_ready
+    rm -f .kit/seeded # seed_once runs it whether or not this kit version did already
+    seed_once
+    ;;
   *)
-    sed -n '2,12p' "$0"
+    sed -n '2,15p' "$0"
     exit 2
     ;;
 esac
